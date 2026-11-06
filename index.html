@@ -1,40 +1,142 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Amigo invisible</title><link rel="stylesheet" href="styles.css"><script src="config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head><body><div class="app"><div id="err" class="card hidden"><h2>No se puede abrir</h2><div id="errText" class="small"></div></div><div id="main" class="hidden"><div class="card"><h1 id="title">🎁 Amigo invisible</h1><div id="subtitle" class="small"></div><div id="amount" class="pill"></div></div><div class="card">
-  <div class="top">
-    <div>
-      <h2>Recepción de regalos</h2>
-      <div id="stats" class="small"></div>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Amigos invisibles</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="top">
+      <div><h1>🎁 Amigos invisibles</h1><div class="small">Gestión independiente de todos los eventos.</div></div>
+      <button class="btn primary" onclick="openCreate()">+ Nuevo</button>
     </div>
-    <button id="addPersonBtn" class="btn light" onclick="openAddPerson()">+ Añadir participante</button>
   </div>
-  <div class="field">
-    <input id="search" placeholder="Buscar participante..." oninput="renderPeople()">
+
+  <div class="card">
+    <div class="top">
+      <div><b>Amigos invisibles</b><div class="small">Por defecto se muestran únicamente los vinculados a eventos activos.</div></div>
+      <button id="filterBtn" class="btn light" onclick="toggleFilters()">Mostrar filtros</button>
+    </div>
+
+    <div id="filters" class="hidden" style="margin-top:12px">
+      <div class="grid2">
+        <div><label>Buscar por nombre</label><input id="search" placeholder="Nombre..." oninput="renderList()"></div>
+        <div>
+          <label>Mostrar</label>
+          <select id="scope" onchange="renderList()">
+            <option value="active">Solo activos</option>
+            <option value="past">Solo pasados/cerrados</option>
+            <option value="all">Todos</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="list" style="margin-top:10px"></div>
   </div>
-  <div id="people"></div>
-</div><div class="card"><h2>Sorteo</h2><div id="drawInfo" class="small"></div><button id="simulateBtn" class="btn light full" onclick="simulate()">🧪 Simular sorteo</button><div id="simBox" class="sim hidden"><div class="top"><b>Simulación</b><button class="btn light" onclick="simBox.classList.add('hidden')">Cerrar</button></div><div id="simSummary"></div><div id="simResults"></div></div><button id="finalBtn" class="btn primary full" onclick="finalizeDraw()">🎲 Sorteo definitivo</button><button id="resetBtn" class="btn danger full hidden" onclick="resetDraw()">Reiniciar sorteo</button><div id="finalStatus" class="hidden"></div></div><div id="resultsCard" class="card hidden"><h2>Consultar resultado individual</h2><div class="field"><select id="personResult"></select></div><button class="btn primary full" onclick="showResult()">Mostrar número</button><div id="revealed" class="hidden" style="text-align:center"><div id="revealedName"></div><div class="small">Tu regalo es el número</div><div id="revealedNumber" class="result"></div><button class="btn light" onclick="hideResult()">Ocultar</button></div></div></div></div>
-<dialog id="addPersonDialog">
-  <div class="card" style="min-width:min(520px,90vw);margin:0">
-    <h2>Añadir participante</h2>
+</div>
+
+<dialog id="createDialog">
+  <div class="card" style="margin:0">
+    <h2>Crear Amigo invisible</h2>
+    <div class="field">
+      <label>Evento activo</label>
+      <select id="meetingSelect" onchange="updateAutoName()"></select>
+    </div>
     <div class="field">
       <label>Nombre</label>
-      <input id="newPersonName" placeholder="Nombre">
+      <input id="autoName" disabled>
     </div>
     <div class="field">
-      <label>Tipo</label>
-      <select id="newPersonType">
-        <option value="Adulto">Adulto</option>
-        <option value="Niño">Niño</option>
-      </select>
+      <label>Importe máximo (€)</label>
+      <input id="maxAmount" type="number" min="0" step="0.01" value="0">
     </div>
-    <div class="field">
-      <label>Grupo</label>
-      <select id="newPersonGroup">
-        <option value="">Sin grupo</option>
-      </select>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
-      <button class="btn light" onclick="document.getElementById('addPersonDialog').close()">Cancelar</button>
-      <button class="btn primary" onclick="addPerson()">Añadir</button>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="createDialog.close()">Cancelar</button>
+      <button class="btn primary" onclick="createExchange()">Crear</button>
     </div>
   </div>
 </dialog>
-<script src="app.js"></script></body></html>
+
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+let exchanges=[],availableMeetings=[];
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function fmtDate(v){if(!v)return '';const d=new Date(v+'T12:00:00');return d.toLocaleDateString('es-ES')}
+function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
+async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
+
+async function load(){
+  try{
+    const d=await rpc('secret_santa_app_home');
+    exchanges=d.exchanges||[];
+    availableMeetings=d.available_meetings||[];
+    renderList();
+  }catch(e){alert(e.message||e)}
+}
+
+function toggleFilters(){
+  const el=document.getElementById('filters');
+  const hidden=el.classList.toggle('hidden');
+  filterBtn.textContent=hidden?'Mostrar filtros':'Ocultar filtros';
+}
+
+function isActiveExchange(x){return x.meeting_status==='Activa'}
+
+function renderList(){
+  const q=(search.value||'').trim().toLowerCase();
+  const s=scope.value;
+  let rows=exchanges.filter(x=>{
+    if(q && !(x.name||'').toLowerCase().includes(q))return false;
+    const active=isActiveExchange(x);
+    if(s==='active'&&!active)return false;
+    if(s==='past'&&active)return false;
+    return true;
+  });
+
+  list.innerHTML=rows.map(x=>`
+    <a class="tile" href="manage.html?id=${encodeURIComponent(x.id)}" style="margin-bottom:10px">
+      <div class="top">
+        <div>
+          <b style="font-size:18px">${esc(x.name)}</b>
+          <div class="small">${x.meeting_name?esc(x.meeting_name)+' · ':''}${fmtDate(x.meeting_date||x.event_date)}</div>
+        </div>
+        <span class="pill">${isActiveExchange(x)?'Activo':'Pasado'}</span>
+      </div>
+      <div class="small" style="margin-top:8px">Importe máximo: ${euro(x.max_amount)} · ${x.draw_finalized?'Sorteo finalizado':'Pendiente de sorteo'}</div>
+    </a>
+  `).join('')||'<div class="small">No hay Amigos invisibles que coincidan.</div>';
+}
+
+function openCreate(){
+  if(!availableMeetings.length)return alert('No hay eventos activos disponibles sin Amigo invisible.');
+  meetingSelect.innerHTML=availableMeetings.map(m=>`<option value="${m.id}">${esc(m.name)} · ${fmtDate(m.meeting_date)}</option>`).join('');
+  maxAmount.value='0';
+  updateAutoName();
+  createDialog.showModal();
+}
+function updateAutoName(){
+  const m=availableMeetings.find(x=>x.id===meetingSelect.value);
+  autoName.value=m?'Amigo invisible - '+m.name:'';
+}
+async function createExchange(){
+  const meetingId=meetingSelect.value;
+  if(!meetingId)return alert('Selecciona un evento.');
+  try{
+    const d=await rpc('secret_santa_app_create',{
+      p_meeting_id:meetingId,
+      p_max_amount:Number(maxAmount.value||0)
+    });
+    location.href='manage.html?id='+encodeURIComponent(d.id);
+  }catch(e){alert(e.message||e)}
+}
+load();
+</script>
+</body>
+</html>

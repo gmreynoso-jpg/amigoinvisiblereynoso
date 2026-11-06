@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gestionar Amigo invisible</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="top">
+      <div><h1 id="title">🎁 Amigo invisible</h1><div id="subtitle" class="small"></div></div>
+      <a class="btn light" href="index.html">← Inicio</a>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div><label>Importe máximo (€)</label><input id="maxAmount" type="number" min="0" step="0.01"></div>
+      <div style="display:flex;align-items:end"><button id="saveAmountBtn" class="btn light full" onclick="saveAmount()">Guardar importe máximo</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="top">
+      <div><h2>Recepción de regalos</h2><div id="stats" class="small"></div></div>
+      <button id="addPersonBtn" class="btn light" onclick="openAddPerson()">+ Añadir participante</button>
+    </div>
+    <div class="field"><input id="search" placeholder="Buscar participante..." oninput="renderPeople()"></div>
+    <div id="people"></div>
+  </div>
+
+  <div class="card">
+    <h2>Sorteo</h2>
+    <div id="drawInfo" class="small"></div>
+    <button id="simulateBtn" class="btn light full" style="margin-top:12px" onclick="simulate()">🧪 Simular sorteo</button>
+    <div id="simBox" class="sim hidden" style="margin-top:12px">
+      <div class="top"><b>Simulación</b><button class="btn light" onclick="simBox.classList.add('hidden')">Cerrar</button></div>
+      <div class="small">No guarda nada.</div>
+      <div id="simSummary" style="margin-top:8px"></div>
+      <div id="simResults"></div>
+    </div>
+    <button id="finalBtn" class="btn primary full" style="margin-top:12px" onclick="finalizeDraw()">🎲 Sorteo definitivo</button>
+    <button id="resetBtn" class="btn danger full hidden" style="margin-top:8px" onclick="resetDraw()">Reiniciar sorteo</button>
+    <div id="finalStatus" class="hidden" style="margin-top:12px"></div>
+  </div>
+
+  <div id="resultsCard" class="card hidden">
+    <h2>Consultar resultado individual</h2>
+    <div class="small">Solo se muestra el número del regalo.</div>
+    <div class="field"><select id="personResult"></select></div>
+    <button class="btn primary full" style="margin-top:10px" onclick="showResult()">Mostrar número</button>
+    <div id="revealed" class="hidden" style="text-align:center;margin-top:16px">
+      <div id="revealedName" style="font-weight:800"></div>
+      <div class="small">Tu regalo es el número</div>
+      <div id="revealedNumber" class="result"></div>
+      <button class="btn light" onclick="hideResult()">Ocultar</button>
+    </div>
+  </div>
+</div>
+
+<dialog id="addPersonDialog">
+  <div class="card" style="margin:0">
+    <h2>Añadir participante</h2>
+    <div class="field"><label>Nombre</label><input id="newPersonName"></div>
+    <div class="field"><label>Tipo</label><select id="newPersonType"><option value="Adulto">Adulto</option><option value="Niño">Niño</option></select></div>
+    <div class="field"><label>Grupo</label><select id="newPersonGroup"><option value="">Sin grupo</option></select></div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="addPersonDialog.close()">Cancelar</button>
+      <button class="btn primary" onclick="addPerson()">Añadir</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+const exchangeId=new URLSearchParams(location.search).get('id');
+let exchange=null,meeting=null,people=[],groups=[];
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
+function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
+async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
+
+async function load(){
+  if(!exchangeId){location.href='index.html';return}
+  try{
+    const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
+    exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];
+    render();
+  }catch(e){alert(e.message||e)}
+}
+function render(){
+  title.textContent='🎁 '+exchange.name;
+  subtitle.textContent=(meeting?.name?meeting.name+' · ':'')+fmtDate(exchange.event_date);
+  maxAmount.value=exchange.max_amount||0;
+  saveAmountBtn.disabled=exchange.draw_finalized;
+  addPersonBtn.disabled=exchange.draw_finalized;
+  renderPeople();renderDraw();
+}
+function renderPeople(){
+  const q=(search.value||'').trim().toLowerCase();
+  const rows=people.filter(p=>!q||(p.name||'').toLowerCase().includes(q));
+  const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
+  stats.textContent=`${gifts} regalos recibidos de ${people.length} participantes`;
+  people.innerHTML=rows.map(p=>`
+    <div class="item">
+      <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
+      <div>
+        ${p.brought_gift
+          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
+          : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
+      </div>
+    </div>`).join('');
+}
+async function saveAmount(){
+  try{
+    await rpc('secret_santa_app_set_max_amount',{
+      p_exchange_id:exchangeId,
+      p_max_amount:Number(maxAmount.value||0)
+    });
+    exchange.max_amount=Number(maxAmount.value||0);
+    alert('Importe máximo guardado.');
+  }catch(e){alert(e.message||e)}
+}
+function openAddPerson(){
+  if(exchange.draw_finalized)return;
+  newPersonName.value='';
+  newPersonType.value='Adulto';
+  newPersonGroup.innerHTML='<option value="">Sin grupo</option>'+
+    groups.map(g=>`<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('');
+  addPersonDialog.showModal();
+}
+async function addPerson(){
+  const name=(newPersonName.value||'').trim();
+  if(!name)return alert('Indica el nombre.');
+  try{
+    const p=await rpc('secret_santa_app_add_person',{
+      p_exchange_id:exchangeId,
+      p_name:name,
+      p_group_name:newPersonGroup.value||null,
+      p_type:newPersonType.value
+    });
+    people.push(p);
+    addPersonDialog.close();
+    render();
+  }catch(e){alert(e.message||e)}
+}
+async function setGift(id,brought){
+  try{
+    const r=await rpc('secret_santa_app_set_gift',{
+      p_exchange_id:exchangeId,
+      p_person_id:id,
+      p_brought:brought
+    });
+    const p=people.find(x=>x.id===id);
+    if(p){p.brought_gift=r.brought_gift;p.gift_number=r.gift_number;p.assigned_gift_number=null}
+    render();
+  }catch(e){alert(e.message||e)}
+}
+function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
+function calc(){
+  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
+  if(eligible.length<2)return null;
+  const nums=eligible.map(p=>p.gift_number),owner=new Map(eligible.map(p=>[p.gift_number,p]));
+  let best=null,bestScore=1e9;
+  const attempts=Math.max(12000,eligible.length*1500);
+  for(let t=0;t<attempts;t++){
+    const perm=shuffle(nums);let valid=true,score=0;
+    for(let i=0;i<eligible.length;i++){
+      if(perm[i]===eligible[i].gift_number){valid=false;break}
+      const o=owner.get(perm[i]);
+      if(eligible[i].group_name&&o?.group_name&&eligible[i].group_name===o.group_name)score++;
+    }
+    if(!valid)continue;
+    if(score<bestScore){bestScore=score;best=eligible.map((p,i)=>({person:p,assigned:perm[i]}));if(score===0)break}
+  }
+  return best?{rows:best,sameGroupConflicts:bestScore}:null;
+}
+function simulate(){
+  const r=calc();if(!r)return alert('Se necesitan al menos 2 regalos.');
+  simBox.classList.remove('hidden');
+  simSummary.innerHTML=r.sameGroupConflicts===0?'<div class="ok">✅ Sin cruces de grupo/familia.</div>':`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`;
+  simResults.innerHTML=r.rows.map(x=>`<div class="item"><b>${esc(x.person.name)}</b><span class="gift">#${x.assigned}</span></div>`).join('');
+}
+async function finalizeDraw(){
+  const r=calc();if(!r)return alert('Se necesitan al menos 2 regalos.');
+  if(!confirm('¿Guardar como sorteo DEFINITIVO?'))return;
+  try{
+    await rpc('secret_santa_app_finalize',{
+      p_exchange_id:exchangeId,
+      p_assignments:r.rows.map(x=>({person_id:x.person.id,assigned_gift_number:x.assigned})),
+      p_same_group_conflicts:r.sameGroupConflicts
+    });
+    await load();
+    simBox.classList.add('hidden');
+  }catch(e){alert(e.message||e)}
+}
+async function resetDraw(){
+  if(!confirm('¿Reiniciar sorteo? Se conservarán los números físicos de los regalos.'))return;
+  try{await rpc('secret_santa_app_reset',{p_exchange_id:exchangeId});await load();hideResult()}catch(e){alert(e.message||e)}
+}
+function renderDraw(){
+  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
+  drawInfo.textContent=`Participan ${eligible.length} personas con regalo.`;
+  simulateBtn.disabled=exchange.draw_finalized;
+  finalBtn.classList.toggle('hidden',exchange.draw_finalized);
+  resetBtn.classList.toggle('hidden',!exchange.draw_finalized);
+  resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
+  if(exchange.draw_finalized){
+    finalStatus.classList.remove('hidden');
+    finalStatus.className=Number(exchange.same_group_conflicts||0)===0?'ok':'warn';
+    finalStatus.textContent=Number(exchange.same_group_conflicts||0)===0?'✅ Sorteo definitivo realizado.':`⚠️ Sorteo definitivo con ${exchange.same_group_conflicts} cruce(s) de grupo/familia.`;
+    personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  }else finalStatus.classList.add('hidden');
+}
+function showResult(){
+  const p=people.find(x=>x.id===personResult.value);
+  if(!p?.assigned_gift_number)return alert('Selecciona una persona.');
+  revealedName.textContent=p.name;revealedNumber.textContent='#'+p.assigned_gift_number;revealed.classList.remove('hidden');
+}
+function hideResult(){revealed.classList.add('hidden');revealedName.textContent='';revealedNumber.textContent='';personResult.value=''}
+load();
+</script>
+</body>
+</html>
