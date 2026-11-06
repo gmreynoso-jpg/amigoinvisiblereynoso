@@ -26,7 +26,7 @@
       <button id="addPersonBtn" class="btn light" onclick="openAddPerson()">+ Añadir participante</button>
     </div>
     <div class="field"><input id="search" placeholder="Buscar participante..." oninput="renderPeople()"></div>
-    <div id="people"></div>
+    <div id="peopleList"></div>
   </div>
 
   <div class="card">
@@ -102,8 +102,8 @@ function renderPeople(){
   const q=(search.value||'').trim().toLowerCase();
   const rows=people.filter(p=>!q||(p.name||'').toLowerCase().includes(q));
   const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
-  stats.textContent=`${gifts} regalos recibidos de ${people.length} participantes`;
-  people.innerHTML=rows.map(p=>`
+  document.getElementById('stats').textContent=`${gifts} regalos recibidos de ${people.length} participantes`;
+  document.getElementById('peopleList').innerHTML=rows.map(p=>`
     <div class="item">
       <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
       <div>
