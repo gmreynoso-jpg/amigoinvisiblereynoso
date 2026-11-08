@@ -99,7 +99,7 @@ function fmtDate(v){if(!v)return '';const d=new Date(v+'T12:00:00');return d.toL
 function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
 async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
 function modeLabel(x){return (x.draw_mode||'gift_numbers')==='classic'?'🕵️ Clásico':'🎁 Sorteo de regalos'}
-function isActiveExchange(x){return !x.draw_finalized}
+function isActiveExchange(x){return !x.delivery_locked}
 
 async function load(){
   try{
@@ -135,11 +135,11 @@ function renderList(){
           <div class="small">${x.meeting_name?'📅 '+esc(x.meeting_name):'🎁 Independiente'}${(x.meeting_date||x.event_date)?' · '+fmtDate(x.meeting_date||x.event_date):''}</div>
           <div class="small" style="margin-top:6px">${modeLabel(x)} · Importe máximo: ${euro(x.max_amount)}</div>
         </div>
-        <span class="pill">${x.draw_finalized?'Cerrado':'Abierto'}</span>
+        <span class="pill">${x.delivery_locked?'Bloqueado':x.draw_finalized?'Sorteo realizado':'Preparación'}</span>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
         <a class="btn light" href="manage.html?id=${encodeURIComponent(x.id)}">Abrir</a>
-        ${x.draw_finalized?'<span class="pill">Solo consulta</span>':`<button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>`}
+        ${x.delivery_locked?'<span class="pill">Entrega iniciada</span>':`<button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>`}
       </div>
     </div>
   `).join('')||'<div class="small">No hay Amigos invisibles que coincidan.</div>';
@@ -200,7 +200,7 @@ async function createExchange(){
 async function deleteExchange(id){
   const x=exchanges.find(e=>e.id===id);
   if(!x)return;
-  if(x.draw_finalized)return alert('El sorteo definitivo ya está realizado. Este Amigo invisible está cerrado y no se puede eliminar.');
+  if(x.delivery_locked)return alert('La entrega ya ha comenzado. El sorteo está bloqueado y no se puede eliminar.');
   const linked=!!x.meeting_id;
   const ok=confirm(
     '¿Eliminar "'+x.name+'"?\n\n'+
