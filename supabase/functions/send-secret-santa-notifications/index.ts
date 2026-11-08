@@ -47,12 +47,15 @@ Deno.serve(async (req) => {
       .single();
 
     if (exErr) throw exErr;
-    if (!exchange.draw_finalized) throw new Error("El sorteo todavía no está realizado");
-    if (!["classic", "blind"].includes(exchange.draw_mode)) {
-      return new Response(
-        JSON.stringify({ ok: true, skipped: true, reason: "mode_without_email_notifications" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+
+    if (action === "draw_results") {
+      if (!exchange.draw_finalized) throw new Error("El sorteo todavía no está realizado");
+      if (!["classic", "blind"].includes(exchange.draw_mode)) {
+        return new Response(
+          JSON.stringify({ ok: true, skipped: true, reason: "mode_without_email_notifications" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     }
 
     const { data: people, error: pErr } = await db
