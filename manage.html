@@ -317,7 +317,9 @@ async function setGift(id,brought){
   try{
     const result=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
     await load();
-    if(brought&&result?.attendance_auto_confirmed){
+    if(brought&&result?.event_participant_created){
+      alert('✅ Regalo recepcionado.\n\n'+(result.participant_name||'Esta persona')+' no estaba vinculada al evento. Se ha añadido automáticamente al historial del evento y su asistencia queda confirmada.');
+    }else if(brought&&result?.attendance_auto_confirmed){
       alert('✅ Regalo recepcionado.\n\nComo este Amigo invisible está vinculado a un evento, la asistencia de '+(result.participant_name||'esta persona')+' se ha confirmado automáticamente.');
     }
     if(brought&&!deliveryLocked())openExclusions(id,true);
