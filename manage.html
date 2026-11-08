@@ -102,13 +102,13 @@ let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusio
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
 function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
-function exchangeExpired(){
-  const d=meeting?.meeting_date||exchange?.event_date;
-  if(!d)return false;
-  const start=new Date(d+'T'+(meeting?.start_time||'23:59:59'));
-  return new Date()>=start;
-}
-function ensureExchangeEditable(){if(exchangeExpired()){alert('Este Amigo invisible ya está vencido y es solo de consulta.');return false}return true}
+function ensureExchangeEditable(){
+  if(exchange?.draw_finalized){
+    alert('El sorteo definitivo ya está realizado. Este Amigo invisible está cerrado y es solo de consulta.');
+    return false;
+  }
+  return true;
+}return true}
 async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
 
 async function load(){
@@ -123,12 +123,11 @@ function render(){
   title.textContent='🎁 '+exchange.name;
   subtitle.textContent=(meeting?.name?meeting.name+' · ':'')+fmtDate(exchange.event_date);
   maxAmount.value=exchange.max_amount||0;
-  const expired=exchangeExpired();
-  saveAmountBtn.disabled=exchange.draw_finalized||expired;
-  addPersonBtn.disabled=exchange.draw_finalized||expired;
-  maxAmount.disabled=exchange.draw_finalized||expired;
-  if(expired){
-    subtitle.textContent+=(subtitle.textContent?' · ':'')+'Vencido · Solo consulta';
+  saveAmountBtn.disabled=exchange.draw_finalized;
+  addPersonBtn.disabled=exchange.draw_finalized;
+  maxAmount.disabled=exchange.draw_finalized;
+  if(exchange.draw_finalized){
+    subtitle.textContent+=(subtitle.textContent?' · ':'')+'Cerrado · Sorteo definitivo';
   }
   renderPeople();renderDraw();
 }
@@ -142,8 +141,8 @@ function renderPeople(){
       <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
       <div>
         ${p.brought_gift
-          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized||exchangeExpired()?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button> <button class="btn light" ${exchange.draw_finalized||exchangeExpired()?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
-          : `<button class="btn primary" ${exchange.draw_finalized||exchangeExpired()?'disabled':''} onclick="setGift('${p.id}',true)">Trae regalo</button>`}
+          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
+          : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Trae regalo</button>`}
       </div>
     </div>`).join('');
 }
@@ -202,7 +201,7 @@ function pairExcluded(a,b){
 }
 
 function openExclusions(personId,justRegistered=false){
-  if(exchange.draw_finalized)return;
+  if(!ensureExchangeEditable())return;
   editingExclusionPersonId=personId;
   exclusionSearch.value='';
   const p=people.find(x=>x.id===personId);
@@ -257,7 +256,7 @@ function calc(){
   }
   return best?{rows:best,sameGroupConflicts:bestScore}:null;
 }
-function simulate(){
+function simulate(){if(!ensureExchangeEditable())return;
   const eligibleCount=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
   if(eligibleCount<2)return alert('Se necesitan al menos 2 regalos.');
   const r=calc();if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
@@ -287,9 +286,9 @@ async function resetDraw(){if(!ensureExchangeEditable())return;
 function renderDraw(){
   const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
   drawInfo.textContent=`Participan ${eligible.length} personas con regalo · ${exclusions.length} exclusión(es) configurada(s).`;
-  simulateBtn.disabled=exchange.draw_finalized||exchangeExpired();
-  finalBtn.classList.toggle('hidden',exchange.draw_finalized||exchangeExpired());
-  resetBtn.classList.toggle('hidden',!exchange.draw_finalized||exchangeExpired());
+  simulateBtn.disabled=exchange.draw_finalized;
+  finalBtn.classList.toggle('hidden',exchange.draw_finalized);
+  resetBtn.classList.toggle('hidden',!exchange.draw_finalized);
   resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
