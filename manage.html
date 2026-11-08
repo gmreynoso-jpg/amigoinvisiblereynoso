@@ -231,7 +231,7 @@ async function setGift(id,brought){
     const p=people.find(x=>x.id===id);
     if(p){p.brought_gift=r.brought_gift;p.gift_number=r.gift_number;p.assigned_gift_number=null}
     render();
-    if(brought)openExclusions(id,true);
+    if(brought&&!deliveryLocked())openExclusions(id,true);
   }catch(e){alert(e.message||e)}
 }
 
