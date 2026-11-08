@@ -220,7 +220,7 @@ function render(){
   addPersonBtn.disabled=deliveryLocked();
   maxAmount.disabled=deliveryLocked();
   peopleTitle.textContent=classic?'Participantes':'Recepción de regalos';
-  if(deliveryLocked())subtitle.textContent+=' · Sorteo bloqueado'; else if(exchange.draw_finalized)subtitle.textContent+=' · Sorteo realizado';
+  if(exchange.delivery_closed_at)subtitle.textContent+=' · Finalizado'; else if(deliveryLocked())subtitle.textContent+=' · Entrega en curso'; else if(exchange.draw_finalized)subtitle.textContent+=' · Sorteo realizado';
   renderPeople();
   renderDraw();
 }
@@ -606,12 +606,16 @@ function renderDraw(){
   resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
   deliveryCard.classList.toggle('hidden',!exchange.draw_finalized);
   deliveryBtn.href='delivery.html?id='+encodeURIComponent(exchangeId);
+  deliveryBtn.textContent=exchange.delivery_closed_at?'Consultar entregas':deliveryLocked()?'Continuar entrega':'Abrir entrega';
 
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
-    if(locked){
+    if(exchange.delivery_closed_at){
+      finalStatus.className='ok';
+      finalStatus.textContent='✅ Amigo invisible finalizado. Todos los participantes incluidos constan como entregados.';
+    }else if(locked){
       finalStatus.className=Number(exchange.same_group_conflicts||0)===0?'ok':'warn';
-      finalStatus.textContent='🔒 Ya se completó al menos una entrega. El sorteo está bloqueado definitivamente.';
+      finalStatus.textContent='🔒 Entrega en curso. El sorteo ya no puede modificarse.';
     }else{
       finalStatus.className='warn';
       finalStatus.textContent='🟡 Sorteo realizado, pero aún editable. Puedes rehacerlo hasta completar la primera entrega.';
