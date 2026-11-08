@@ -404,12 +404,15 @@ function simulate(){
   simBox.classList.remove('hidden');
 
   const missing=isClassic()?people.filter(p=>!p.brought_gift||p.gift_number==null).length:0;
+  const excludedNoGift=isClassic()?0:people.length-count;
   simSummary.innerHTML=
     (r.sameGroupConflicts===0
       ?'<div class="ok">✅ Sin cruces de grupo/familia.</div>'
       :`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`)+
     '<div class="small" style="margin-top:8px"><b>Vista previa completa.</b> La asignación y la entrega simulada no guardan nada. '+
-    (missing?missing+' regalo(s) todavía no tienen número físico y aparecerán como pendientes.':'Todos los regalos están registrados.')+
+    (isClassic()
+      ?(missing?missing+' regalo(s) todavía no tienen número físico y aparecerán como pendientes.':'Todos los regalos están registrados.')
+      :count+' participante(s) entran en el sorteo por haber entregado regalo'+(excludedNoGift?' y '+excludedNoGift+' quedan fuera por no haberlo entregado.':'.'))+
     '</div>';
 
   if(isClassic()){
