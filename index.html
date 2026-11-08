@@ -11,14 +11,14 @@
 <div class="app">
   <div class="card">
     <div class="top">
-      <div><h1>🎁 Amigos invisibles</h1><div class="small">Gestión independiente de todos los eventos.</div></div>
+      <div><h1>🎁 Amigos invisibles</h1><div class="small">Sorteos vinculados a reuniones o completamente independientes.</div></div>
       <button class="btn primary" onclick="openCreate()">+ Nuevo</button>
     </div>
   </div>
 
   <div class="card">
     <div class="top">
-      <div><b>Amigos invisibles</b><div class="small">Por defecto se muestran únicamente los vinculados a eventos activos.</div></div>
+      <div><b>Amigos invisibles</b><div class="small">Por defecto se muestran los sorteos abiertos.</div></div>
       <button id="filterBtn" class="btn light" onclick="toggleFilters()">Mostrar filtros</button>
     </div>
 
@@ -28,8 +28,8 @@
         <div>
           <label>Mostrar</label>
           <select id="scope" onchange="renderList()">
-            <option value="active">Solo activos</option>
-            <option value="past">Solo pasados/cerrados</option>
+            <option value="active">Solo abiertos</option>
+            <option value="past">Solo cerrados</option>
             <option value="all">Todos</option>
           </select>
         </div>
@@ -43,18 +43,44 @@
 <dialog id="createDialog">
   <div class="card" style="margin:0">
     <h2>Crear Amigo invisible</h2>
+
     <div class="field">
-      <label>Evento activo</label>
-      <select id="meetingSelect" onchange="updateAutoName()"></select>
+      <label>Modalidad</label>
+      <select id="drawMode" onchange="updateCreateForm()">
+        <option value="gift_numbers">🎁 Sorteo de regalos el día del evento</option>
+        <option value="classic">🕵️ Amigo invisible clásico</option>
+      </select>
+      <div id="modeHelp" class="small" style="margin-top:6px"></div>
     </div>
+
+    <div class="field">
+      <label>Origen de participantes</label>
+      <select id="sourceMode" onchange="updateCreateForm()">
+        <option value="meeting">Usar una reunión existente</option>
+        <option value="independent">Crear independiente</option>
+      </select>
+    </div>
+
+    <div id="meetingArea" class="field">
+      <label>Reunión activa</label>
+      <select id="meetingSelect" onchange="updateCreateForm()"></select>
+    </div>
+
     <div class="field">
       <label>Nombre</label>
-      <input id="autoName" disabled>
+      <input id="exchangeName">
     </div>
+
+    <div id="dateArea" class="field hidden">
+      <label>Fecha del encuentro · opcional</label>
+      <input id="eventDate" type="date">
+    </div>
+
     <div class="field">
-      <label>Importe máximo (€)</label>
+      <label>Importe máximo (€) · opcional</label>
       <input id="maxAmount" type="number" min="0" step="0.01" value="0">
     </div>
+
     <div class="grid2" style="margin-top:14px">
       <button class="btn light" onclick="createDialog.close()">Cancelar</button>
       <button class="btn primary" onclick="createExchange()">Crear</button>
@@ -71,6 +97,8 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&l
 function fmtDate(v){if(!v)return '';const d=new Date(v+'T12:00:00');return d.toLocaleDateString('es-ES')}
 function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
 async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
+function modeLabel(x){return (x.draw_mode||'gift_numbers')==='classic'?'🕵️ Clásico':'🎁 Sorteo de regalos'}
+function isActiveExchange(x){return !x.draw_finalized}
 
 async function load(){
   try{
@@ -86,8 +114,6 @@ function toggleFilters(){
   const hidden=el.classList.toggle('hidden');
   filterBtn.textContent=hidden?'Mostrar filtros':'Ocultar filtros';
 }
-
-function isActiveExchange(x){return x.meeting_status==='Activa'&&!x.draw_finalized}
 
 function renderList(){
   const q=(search.value||'').trim().toLowerCase();
@@ -105,37 +131,62 @@ function renderList(){
       <div class="top">
         <div style="min-width:0;flex:1">
           <b style="font-size:18px">${esc(x.name)}</b>
-          <div class="small">${x.meeting_name?esc(x.meeting_name)+' · ':''}${fmtDate(x.meeting_date||x.event_date)}</div>
-          <div class="small" style="margin-top:8px">Importe máximo: ${euro(x.max_amount)} · ${x.draw_finalized?'Sorteo finalizado':'Pendiente de sorteo'}</div>
+          <div class="small">${x.meeting_name?'📅 '+esc(x.meeting_name):'🎁 Independiente'}${(x.meeting_date||x.event_date)?' · '+fmtDate(x.meeting_date||x.event_date):''}</div>
+          <div class="small" style="margin-top:6px">${modeLabel(x)} · Importe máximo: ${euro(x.max_amount)}</div>
         </div>
-        <span class="pill">${x.draw_finalized?'Cerrado':(isActiveExchange(x)?'Activo':'Pasado')}</span>
+        <span class="pill">${x.draw_finalized?'Cerrado':'Abierto'}</span>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
         <a class="btn light" href="manage.html?id=${encodeURIComponent(x.id)}">Abrir</a>
-        ${x.draw_finalized?'<span class="pill">Cerrado · Solo consulta</span>':`<button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>`}
+        ${x.draw_finalized?'<span class="pill">Solo consulta</span>':`<button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>`}
       </div>
     </div>
   `).join('')||'<div class="small">No hay Amigos invisibles que coincidan.</div>';
 }
 
 function openCreate(){
-  if(!availableMeetings.length)return alert('No hay eventos activos disponibles sin Amigo invisible.');
+  drawMode.value='gift_numbers';
+  sourceMode.value=availableMeetings.length?'meeting':'independent';
   meetingSelect.innerHTML=availableMeetings.map(m=>`<option value="${m.id}">${esc(m.name)} · ${fmtDate(m.meeting_date)}</option>`).join('');
+  exchangeName.value='';
+  eventDate.value='';
   maxAmount.value='0';
-  updateAutoName();
+  updateCreateForm();
   createDialog.showModal();
 }
-function updateAutoName(){
-  const m=availableMeetings.find(x=>x.id===meetingSelect.value);
-  autoName.value=m?'Amigo invisible - '+m.name:'';
+
+function updateCreateForm(){
+  const independent=sourceMode.value==='independent';
+  const classic=drawMode.value==='classic';
+  meetingArea.classList.toggle('hidden',independent);
+  dateArea.classList.toggle('hidden',!independent);
+  if(!independent&&!availableMeetings.length){
+    sourceMode.value='independent';
+    return updateCreateForm();
+  }
+  modeHelp.textContent=classic
+    ?'El sorteo se hace antes: cada persona conocerá en secreto a quién debe regalar.'
+    :'Los regalos se numeran el día del encuentro y nadie sabe previamente quién recibirá cada regalo.';
+  if(!independent){
+    const m=availableMeetings.find(x=>x.id===meetingSelect.value);
+    exchangeName.value=m?(classic?'Amigo invisible - ':'Sorteo de regalos - ')+m.name:'';
+  }else if(!exchangeName.value.trim()){
+    exchangeName.value=classic?'Amigo invisible':'Sorteo de regalos';
+  }
 }
+
 async function createExchange(){
-  const meetingId=meetingSelect.value;
-  if(!meetingId)return alert('Selecciona un evento.');
+  const independent=sourceMode.value==='independent';
+  const meetingId=independent?null:meetingSelect.value;
+  if(!independent&&!meetingId)return alert('Selecciona una reunión.');
+  if(independent&&!exchangeName.value.trim())return alert('Indica un nombre.');
   try{
-    const d=await rpc('secret_santa_app_create',{
+    const d=await rpc('secret_santa_app_create_v2',{
       p_meeting_id:meetingId,
-      p_max_amount:Number(maxAmount.value||0)
+      p_name:exchangeName.value.trim()||null,
+      p_event_date:independent?(eventDate.value||null):null,
+      p_max_amount:Number(maxAmount.value||0),
+      p_draw_mode:drawMode.value
     });
     location.href='manage.html?id='+encodeURIComponent(d.id);
   }catch(e){alert(e.message||e)}
@@ -145,20 +196,15 @@ async function deleteExchange(id){
   const x=exchanges.find(e=>e.id===id);
   if(!x)return;
   if(x.draw_finalized)return alert('El sorteo definitivo ya está realizado. Este Amigo invisible está cerrado y no se puede eliminar.');
+  const linked=!!x.meeting_id;
   const ok=confirm(
     '¿Eliminar "'+x.name+'"?\n\n'+
-    'Se borrarán el sorteo, los números de regalo, las exclusiones y sus participantes dentro del Amigo invisible.\n\n'+
-    'La reunión vinculada y sus participantes generales NO se eliminarán.\n\n'+
+    'Se borrarán sus participantes internos, exclusiones y cualquier preparación del sorteo.\n\n'+
+    (linked?'La reunión vinculada y sus participantes generales NO se eliminarán.\n\n':'')+
     'Esta acción no se puede deshacer.'
   );
   if(!ok)return;
-
-  try{
-    await rpc('secret_santa_app_delete',{p_exchange_id:id});
-    await load();
-  }catch(e){
-    alert(e.message||e);
-  }
+  try{await rpc('secret_santa_app_delete',{p_exchange_id:id});await load()}catch(e){alert(e.message||e)}
 }
 load();
 </script>
