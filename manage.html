@@ -208,7 +208,7 @@ function renderPeople(){
         <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="removePerson('${p.id}')">No participa</button>
         ${p.brought_gift
           ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="setGift('${p.id}',false)">Quitar regalo</button>`
-          : `<button class="btn primary" onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
+          : `<button class="btn primary" ${deliveryLocked()&&!isClassic()?'disabled':''} onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
       </div>
     </div>`).join('')||'<div class="small">Todavía no hay participantes.</div>';
 }
@@ -273,11 +273,10 @@ async function removePerson(id){
 
 async function setGift(id,brought){
   if(!brought&&!ensureExchangeEditable())return;
+  if(brought&&deliveryLocked()&&!isClassic())return alert('La entrega ya ha comenzado. En Sorteo de regalos no se pueden incorporar nuevos participantes después de la primera entrega.');
   try{
-    const r=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
-    const p=people.find(x=>x.id===id);
-    if(p){p.brought_gift=r.brought_gift;p.gift_number=r.gift_number;p.assigned_gift_number=null}
-    render();
+    await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
+    await load();
     if(brought&&!deliveryLocked())openExclusions(id,true);
   }catch(e){alert(e.message||e)}
 }
