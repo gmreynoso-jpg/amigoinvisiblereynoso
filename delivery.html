@@ -117,11 +117,12 @@ async function load(first=false){
   try{
     data=await rpc('secret_santa_app_delivery',{p_exchange_id:exchangeId});
     rows=data.people||[];
-    backBtn.href='manage.html?id='+encodeURIComponent(exchangeId);
+    backBtn.href='index.html';
     subtitle.textContent=(data.exchange?.name||'Amigo invisible')+(data.exchange?.event_date?' · '+fmtDate(data.exchange.event_date):'');
     await ensureQueue();
     render();
-    if(first&&autoStart&&!data.exchange.delivery_closed_at)startOrResumeRound();
+    if(first&&autoStart&&!data.exchange.delivery_closed_at)await startOrResumeRound();
+    if(first)restoreExactDeliveryPoint();
   }catch(e){alert(e.message||e)}
 }
 
@@ -131,6 +132,15 @@ async function ensureQueue(){
   await rpc('secret_santa_app_start_delivery',{p_exchange_id:exchangeId,p_order:ids});
   data=await rpc('secret_santa_app_delivery',{p_exchange_id:exchangeId});
   rows=data.people||[];
+}
+
+function restoreExactDeliveryPoint(){
+  const ex=data?.exchange||{};
+  if(ex.delivery_closed_at||ex.delivery_paused||!ex.current_delivery_person_id)return;
+  const row=rows.find(x=>x.person_id===ex.current_delivery_person_id&&!x.delivered_at);
+  if(!row)return;
+  current=row;
+  openReveal(row.person_id,true,!!ex.delivery_revealed);
 }
 
 function render(){
@@ -151,7 +161,7 @@ function render(){
     stateInfo.innerHTML='🔒 <b>Sorteo bloqueado.</b> La entrega está en curso.';
     roundBtn.classList.add('hidden'); pauseBtn.classList.remove('hidden');
   }else{
-    stateInfo.innerHTML='🟡 Sorteo realizado. Puedes empezar la ronda. El sorteo se bloqueará al confirmar la primera entrega real.';
+    stateInfo.innerHTML='🟡 Sorteo realizado. Esta es la pantalla de entrega. El sorteo se bloqueará al confirmar la primera entrega real.';
     roundBtn.textContent='▶ Iniciar entrega'; roundBtn.classList.remove('hidden'); pauseBtn.classList.add('hidden');
   }
 
@@ -166,7 +176,8 @@ function orderedPending(){
 function renderCurrent(){
   const ex=data?.exchange||{};
   if(ex.delivery_closed_at||ex.delivery_paused){currentCard.classList.add('hidden');return}
-  const next=orderedPending()[0];
+  const persisted=rows.find(x=>x.person_id===ex.current_delivery_person_id&&!x.delivered_at);
+  const next=persisted||orderedPending()[0];
   if(!next){currentCard.classList.add('hidden');return}
   current=next;
   currentName.textContent=next.person_name;
@@ -214,20 +225,37 @@ async function skipCurrent(){
   }catch(e){alert(e.message||e)}
 }
 function openCurrent(){if(current)openReveal(current.person_id)}
-function openReveal(id){
+async function openReveal(id,restoring=false,revealed=false){
   current=rows.find(x=>x.person_id===id);
   if(!current)return;
+  if(!restoring){
+    try{await rpc('secret_santa_app_set_delivery_current',{p_exchange_id:exchangeId,p_person_id:id,p_revealed:false})}
+    catch(e){alert(e.message||e);return}
+  }
   revealName.textContent=current.person_name;
-  giftArea.classList.add('hidden'); revealBtn.classList.remove('hidden');
-  revealDialog.showModal();
+  if(revealed){
+    revealBtn.classList.add('hidden'); giftArea.classList.remove('hidden'); showGiftValue();
+  }else{
+    giftArea.classList.add('hidden'); revealBtn.classList.remove('hidden');
+  }
+  if(!revealDialog.open)revealDialog.showModal();
 }
-function revealGift(){
+async function revealGift(){
   if(!current)return;
-  revealBtn.classList.add('hidden'); giftArea.classList.remove('hidden');
+  try{await rpc('secret_santa_app_set_delivery_current',{p_exchange_id:exchangeId,p_person_id:current.person_id,p_revealed:true})}
+  catch(e){alert(e.message||e);return}
+  revealBtn.classList.add('hidden'); giftArea.classList.remove('hidden'); showGiftValue();
+}
+function showGiftValue(){
   if(current.gift_number!=null){giftValue.textContent='#'+current.gift_number;giftNote.textContent=''}
   else{giftValue.textContent='Pendiente';giftNote.textContent='El regalo físico todavía no está registrado. Puedes cerrar sin entregar y continuar con otra persona.'}
 }
-function closeReveal(){revealDialog.close();current=null}
+async function closeReveal(){
+  try{
+    if(current)await rpc('secret_santa_app_set_delivery_current',{p_exchange_id:exchangeId,p_person_id:current.person_id,p_revealed:false});
+  }catch(e){}
+  revealDialog.close(); current=null; await load();
+}
 
 function markDelivered(){
   if(!current)return;
