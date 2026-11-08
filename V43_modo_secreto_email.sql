@@ -45,6 +45,10 @@ alter table public.secret_santa_people
   add column if not exists notification_sent_at timestamptz null;
 alter table public.secret_santa_people
   add column if not exists notification_error text null;
+alter table public.secret_santa_people
+  add column if not exists profile_request_sent_at timestamptz null;
+alter table public.secret_santa_people
+  add column if not exists profile_request_error text null;
 
 -- Cada cambio real de asignación obliga a reenviar el correo.
 create or replace function public.secret_santa_v43_reset_notification()
@@ -236,7 +240,8 @@ end;
 $$;
 
 
--- 4. ACTUALIZAR EMAIL Y FICHA
+-- 4. ACTUALIZAR EMAIL DEL PARTICIPANTE
+-- La ficha secreta la completa el propio participante.
 drop function if exists public.secret_santa_app_update_person_details(
   uuid,uuid,text,text,text,text,text,text,text
 );
@@ -260,6 +265,7 @@ as $$
 declare
   v_exchange public.secret_santa_exchanges;
   v_email text;
+  v_old_email text;
 begin
   select * into v_exchange
   from public.secret_santa_exchanges
@@ -273,28 +279,138 @@ begin
     raise exception 'El correo electrónico es obligatorio en esta modalidad';
   end if;
 
-  if v_exchange.draw_mode='blind'
-     and coalesce(nullif(trim(p_clothing_size),''),
-                  nullif(trim(p_shoe_size),''),
-                  nullif(trim(p_likes),''),
-                  nullif(trim(p_dislikes),''),
-                  nullif(trim(p_wishlist),''),
-                  nullif(trim(p_profile_notes),'')) is null then
-    raise exception 'La ficha anónima debe contener al menos un dato';
-  end if;
+  select email into v_old_email
+  from public.secret_santa_people
+  where id=p_person_id and exchange_id=p_exchange_id;
+
+  if not found then raise exception 'Participante no encontrado'; end if;
 
   update public.secret_santa_people
   set
     email=v_email,
+    profile_request_sent_at=
+      case when email is distinct from v_email then null else profile_request_sent_at end,
+    profile_request_error=
+      case when email is distinct from v_email then null else profile_request_error end
+  where id=p_person_id and exchange_id=p_exchange_id;
+end;
+$$;
+
+
+-- 4B. FICHA PERSONAL: CONSULTA POR TOKEN
+drop function if exists public.secret_santa_profile_get(uuid);
+
+create function public.secret_santa_profile_get(p_token uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path=public
+as $$
+declare
+  v_person public.secret_santa_people;
+  v_exchange public.secret_santa_exchanges;
+begin
+  select * into v_person
+  from public.secret_santa_people
+  where result_token=p_token;
+
+  if not found then raise exception 'Enlace personal no válido'; end if;
+
+  select * into v_exchange
+  from public.secret_santa_exchanges
+  where id=v_person.exchange_id;
+
+  if v_exchange.draw_mode<>'blind' then
+    raise exception 'Este enlace no corresponde a un Amigo invisible secreto';
+  end if;
+
+  if not coalesce(v_person.is_active,true) then
+    raise exception 'Ya no participas en este Amigo invisible';
+  end if;
+
+  return jsonb_build_object(
+    'exchange_name',v_exchange.name,
+    'event_date',v_exchange.event_date,
+    'max_amount',v_exchange.max_amount,
+    'person_name',v_person.name,
+    'clothing_size',v_person.clothing_size,
+    'shoe_size',v_person.shoe_size,
+    'likes',v_person.likes,
+    'dislikes',v_person.dislikes,
+    'wishlist',v_person.wishlist,
+    'profile_notes',v_person.profile_notes,
+    'draw_finalized',v_exchange.draw_finalized
+  );
+end;
+$$;
+
+
+-- 4C. FICHA PERSONAL: GUARDAR POR TOKEN
+drop function if exists public.secret_santa_profile_save(
+  uuid,text,text,text,text,text,text
+);
+
+create function public.secret_santa_profile_save(
+  p_token uuid,
+  p_clothing_size text,
+  p_shoe_size text,
+  p_likes text,
+  p_dislikes text,
+  p_wishlist text,
+  p_profile_notes text
+)
+returns void
+language plpgsql
+security definer
+set search_path=public
+as $$
+declare
+  v_person public.secret_santa_people;
+  v_exchange public.secret_santa_exchanges;
+begin
+  select * into v_person
+  from public.secret_santa_people
+  where result_token=p_token
+  for update;
+
+  if not found then raise exception 'Enlace personal no válido'; end if;
+
+  select * into v_exchange
+  from public.secret_santa_exchanges
+  where id=v_person.exchange_id;
+
+  if v_exchange.draw_mode<>'blind' then
+    raise exception 'Este enlace no corresponde a un Amigo invisible secreto';
+  end if;
+
+  if not coalesce(v_person.is_active,true) then
+    raise exception 'Ya no participas en este Amigo invisible';
+  end if;
+
+  if coalesce(v_exchange.draw_finalized,false) then
+    raise exception 'El sorteo ya se ha realizado. La ficha ya no puede modificarse.';
+  end if;
+
+  if coalesce(
+      nullif(trim(coalesce(p_clothing_size,'')),''),
+      nullif(trim(coalesce(p_shoe_size,'')),''),
+      nullif(trim(coalesce(p_likes,'')),''),
+      nullif(trim(coalesce(p_dislikes,'')),''),
+      nullif(trim(coalesce(p_wishlist,'')),''),
+      nullif(trim(coalesce(p_profile_notes,'')),'')
+     ) is null then
+    raise exception 'Añade al menos un dato de gustos, talla o lista de deseos';
+  end if;
+
+  update public.secret_santa_people
+  set
     clothing_size=nullif(trim(coalesce(p_clothing_size,'')),''),
     shoe_size=nullif(trim(coalesce(p_shoe_size,'')),''),
     likes=nullif(trim(coalesce(p_likes,'')),''),
     dislikes=nullif(trim(coalesce(p_dislikes,'')),''),
     wishlist=nullif(trim(coalesce(p_wishlist,'')),''),
     profile_notes=nullif(trim(coalesce(p_profile_notes,'')),'')
-  where id=p_person_id and exchange_id=p_exchange_id;
-
-  if not found then raise exception 'Participante no encontrado'; end if;
+  where id=v_person.id;
 end;
 $$;
 
@@ -316,7 +432,22 @@ select jsonb_build_object(
       select jsonb_agg(
         case
           when e.draw_mode='blind'
-          then to_jsonb(p)-'assigned_person_id'-'assigned_gift_number'
+          then
+            (
+              to_jsonb(p)
+              - 'assigned_person_id'
+              - 'assigned_gift_number'
+              - 'clothing_size'
+              - 'shoe_size'
+              - 'likes'
+              - 'dislikes'
+              - 'wishlist'
+              - 'profile_notes'
+            )
+            || jsonb_build_object(
+              'profile_complete',
+              coalesce(p.clothing_size,p.shoe_size,p.likes,p.dislikes,p.wishlist,p.profile_notes) is not null
+            )
           else to_jsonb(p)
         end
         order by p.created_at,p.name
@@ -787,6 +918,104 @@ end;
 $$;
 
 
+-- 10B. MARCAR ENTREGA: BLIND COMO CLASSIC
+drop function if exists public.secret_santa_app_set_delivered(uuid,uuid,boolean);
+
+create function public.secret_santa_app_set_delivered(
+  p_exchange_id uuid,
+  p_person_id uuid,
+  p_delivered boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path=public
+as $$
+declare
+  v_exchange public.secret_santa_exchanges;
+  v_has_gift boolean:=false;
+  v_next uuid;
+begin
+  select * into v_exchange
+  from public.secret_santa_exchanges
+  where id=p_exchange_id
+  for update;
+
+  if not found then raise exception 'Amigo invisible no encontrado'; end if;
+  if not coalesce(v_exchange.draw_finalized,false) then raise exception 'Primero debes realizar el sorteo'; end if;
+  if v_exchange.delivery_closed_at is not null then raise exception 'El Amigo invisible ya está finalizado'; end if;
+
+  if v_exchange.draw_mode in ('classic','blind') then
+    select exists(
+      select 1
+      from public.secret_santa_people recipient
+      join public.secret_santa_people giver
+        on giver.exchange_id=p_exchange_id
+       and giver.assigned_person_id=recipient.id
+       and giver.is_active=true
+       and giver.brought_gift=true
+       and giver.gift_number is not null
+      where recipient.id=p_person_id
+        and recipient.exchange_id=p_exchange_id
+        and recipient.is_active=true
+        and recipient.assigned_person_id is not null
+    ) into v_has_gift;
+  else
+    select exists(
+      select 1
+      from public.secret_santa_people receiver
+      join public.secret_santa_people gift_owner
+        on gift_owner.id=receiver.assigned_person_id
+       and gift_owner.exchange_id=p_exchange_id
+       and gift_owner.is_active=true
+       and gift_owner.brought_gift=true
+       and gift_owner.gift_number is not null
+      where receiver.id=p_person_id
+        and receiver.exchange_id=p_exchange_id
+        and receiver.is_active=true
+        and receiver.brought_gift=true
+        and receiver.gift_number is not null
+    ) into v_has_gift;
+  end if;
+
+  if coalesce(p_delivered,false) then
+    if not v_has_gift then
+      raise exception 'El regalo físico todavía no está disponible para esta persona';
+    end if;
+
+    if not coalesce(v_exchange.delivery_locked,false) then
+      update public.secret_santa_exchanges
+      set delivery_locked=true,
+          delivery_started_at=coalesce(delivery_started_at,now()),
+          delivery_paused=false
+      where id=p_exchange_id;
+    end if;
+
+    update public.secret_santa_people
+    set delivered_at=coalesce(delivered_at,now())
+    where id=p_person_id and exchange_id=p_exchange_id and is_active=true;
+  else
+    update public.secret_santa_people
+    set delivered_at=null
+    where id=p_person_id and exchange_id=p_exchange_id and is_active=true;
+  end if;
+
+  select p.id into v_next
+  from public.secret_santa_people p
+  where p.exchange_id=p_exchange_id
+    and p.is_active=true
+    and p.delivered_at is null
+    and p.delivery_order is not null
+  order by p.delivery_order,p.created_at
+  limit 1;
+
+  update public.secret_santa_exchanges
+  set current_delivery_person_id=v_next,delivery_revealed=false
+  where id=p_exchange_id;
+end;
+$$;
+
+
 -- 11. PERSONAL RESULT: BLIND NUNCA DEVUELVE IDENTIDAD
 drop function if exists public.secret_santa_app_personal_result(uuid);
 
@@ -854,12 +1083,15 @@ $$;
 grant execute on function public.secret_santa_app_create_v3(uuid,text,date,numeric,text) to anon,authenticated;
 grant execute on function public.secret_santa_app_add_person_v2(uuid,text,text,text,text) to anon,authenticated;
 grant execute on function public.secret_santa_app_update_person_details(uuid,uuid,text,text,text,text,text,text,text) to anon,authenticated;
+grant execute on function public.secret_santa_profile_get(uuid) to anon,authenticated;
+grant execute on function public.secret_santa_profile_save(uuid,text,text,text,text,text,text) to anon,authenticated;
 grant execute on function public.secret_santa_app_get(uuid) to anon,authenticated;
 grant execute on function public.secret_santa_app_simulate_blind(uuid) to anon,authenticated;
 grant execute on function public.secret_santa_app_finalize_blind(uuid) to anon,authenticated;
 grant execute on function public.secret_santa_app_delivery(uuid) to anon,authenticated;
 grant execute on function public.secret_santa_app_start_delivery(uuid,uuid[]) to anon,authenticated;
 grant execute on function public.secret_santa_app_close_delivery(uuid) to anon,authenticated;
+grant execute on function public.secret_santa_app_set_delivered(uuid,uuid,boolean) to anon,authenticated;
 grant execute on function public.secret_santa_app_personal_result(uuid) to anon,authenticated;
 
 commit;
