@@ -182,7 +182,7 @@ function renderPeople(){
         ${exclusionButton(p.id)}
         ${p.brought_gift
           ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="setGift('${p.id}',false)">Quitar regalo</button>`
-          : `<button class="btn primary" ${deliveryLocked()?'disabled':''} onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
+          : `<button class="btn primary" onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
       </div>
     </div>`).join('')||'<div class="small">Todavía no hay participantes.</div>';
 }
@@ -225,7 +225,7 @@ async function addPerson(){
 }
 
 async function setGift(id,brought){
-  if(!ensureExchangeEditable())return;
+  if(!brought&&!ensureExchangeEditable())return;
   try{
     const r=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
     const p=people.find(x=>x.id===id);
