@@ -201,6 +201,9 @@ function renderList(){
     <div class="item">
       <div><b>${esc(x.person_name)}</b><div class="small">${x.delivered_at?'✅ Entregado':'⏳ Pendiente'}${x.has_gift?' · Regalo registrado':' · Regalo físico pendiente'}</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${!x.has_gift&&data.exchange.draw_mode==='classic'&&x.gift_owner_id
+          ?`<button class="btn light" ${data.exchange.delivery_closed_at?'disabled':''} onclick="registerLateClassicGift('${x.gift_owner_id}','${esc(x.gift_owner_name||'participante')}')">Registrar regalo de ${esc(x.gift_owner_name||'participante')}</button>`
+          :''}
         ${x.delivered_at
           ?`<button class="btn light" ${data.exchange.delivery_closed_at?'disabled':''} onclick="setPending('${x.person_id}')">Marcar pendiente</button>`
           :`<button class="btn light" ${data.exchange.delivery_paused||data.exchange.delivery_closed_at?'disabled':''} onclick="openReveal('${x.person_id}')">Mostrar</button>`}
@@ -277,6 +280,14 @@ async function completeDelivery(){
     revealDialog.close(); current=null; await load();
   }catch(e){alert(e.message||e)}
 }
+async function registerLateClassicGift(personId,name){
+  if(!confirm('¿Registrar ahora el regalo físico de '+name+'? El sorteo no cambiará.'))return;
+  try{
+    await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:personId,p_brought:true});
+    await load();
+  }catch(e){alert(e.message||e)}
+}
+
 async function setPending(id){
   if(!confirm('¿Volver a marcar esta entrega como pendiente? El sorteo seguirá bloqueado.'))return;
   try{await rpc('secret_santa_app_set_delivered',{p_exchange_id:exchangeId,p_person_id:id,p_delivered:false});await load()}
