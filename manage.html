@@ -37,13 +37,6 @@
     <div id="finalStatus" class="hidden" style="margin-top:12px"></div>
   </div>
 
-  <div id="deliveryCard" class="card hidden">
-    <div class="top">
-      <div><h2>🎁 Entrega de regalos</h2><div class="small">Llama a cada participante, revela solo su regalo y márcalo como entregado.</div></div>
-      <a id="deliveryBtn" class="btn primary" href="#">Abrir entrega</a>
-    </div>
-  </div>
-
   <div id="resultsCard" class="card hidden">
     <h2>Consultar resultado individual</h2>
     <div id="resultHelp" class="small"></div>
@@ -176,6 +169,10 @@ async function load(){
   try{
     const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
     exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];exclusions=d.exclusions||[];
+    if(exchange.delivery_prepared_at||exchange.delivery_locked||exchange.delivery_closed_at){
+      location.replace('delivery.html?id='+encodeURIComponent(exchangeId));
+      return;
+    }
     render();
   }catch(e){alert(e.message||e)}
 }
@@ -427,9 +424,9 @@ function startSimDelivery(){
       :r.rows.map(x=>({person_id:x.person.id,person_name:x.person.name,gift_number:x.recipient.gift_number??null,has_gift:true}))
     )
   };
-  sessionStorage.setItem('secretSantaSimulation:'+exchangeId,JSON.stringify(payload));
+  localStorage.setItem('secretSantaSimulation:'+exchangeId,JSON.stringify(payload));
   simDoneDialog.close();
-  location.href='delivery.html?id='+encodeURIComponent(exchangeId)+'&simulation=1';
+  location.href='simulation.html?id='+encodeURIComponent(exchangeId);
 }
 function finalizeDraw(){
   if(!ensureExchangeEditable())return;
@@ -499,22 +496,11 @@ function renderDraw(){
   finalBtn.classList.toggle('hidden',locked);
   finalBtn.textContent=exchange.draw_finalized?'🔄 Rehacer sorteo':'🎲 Realizar sorteo';
   resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
-  deliveryCard.classList.toggle('hidden',!exchange.draw_finalized);
-  deliveryBtn.href='delivery.html?id='+encodeURIComponent(exchangeId);
-  deliveryBtn.textContent=exchange.delivery_closed_at?'Consultar entregas':deliveryLocked()?'Continuar entrega':'Abrir entrega';
 
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
-    if(exchange.delivery_closed_at){
-      finalStatus.className='ok';
-      finalStatus.textContent='✅ Amigo invisible finalizado. Todos los participantes incluidos constan como entregados.';
-    }else if(locked){
-      finalStatus.className=Number(exchange.same_group_conflicts||0)===0?'ok':'warn';
-      finalStatus.textContent='🔒 Entrega en curso. El sorteo ya no puede modificarse.';
-    }else{
-      finalStatus.className='warn';
-      finalStatus.textContent='🟡 Sorteo realizado, pero aún editable. Puedes rehacerlo hasta completar la primera entrega.';
-    }
+    finalStatus.className='ok';
+    finalStatus.innerHTML='✅ <b>Sorteo realizado.</b> Todavía puedes rehacerlo mientras no comiences una entrega real.<br><a class="btn primary" style="display:inline-block;margin-top:10px" href="delivery.html?id='+encodeURIComponent(exchangeId)+'&start=1">Ir a entrega de regalos →</a>';
     personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
     resultHelp.textContent=classic
       ?'Consulta privada de a quién debe regalar cada participante.'
