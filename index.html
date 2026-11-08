@@ -101,16 +101,20 @@ function renderList(){
   });
 
   list.innerHTML=rows.map(x=>`
-    <a class="tile" href="manage.html?id=${encodeURIComponent(x.id)}" style="margin-bottom:10px">
+    <div class="tile" style="margin-bottom:10px">
       <div class="top">
-        <div>
+        <div style="min-width:0;flex:1">
           <b style="font-size:18px">${esc(x.name)}</b>
           <div class="small">${x.meeting_name?esc(x.meeting_name)+' · ':''}${fmtDate(x.meeting_date||x.event_date)}</div>
+          <div class="small" style="margin-top:8px">Importe máximo: ${euro(x.max_amount)} · ${x.draw_finalized?'Sorteo finalizado':'Pendiente de sorteo'}</div>
         </div>
         <span class="pill">${isActiveExchange(x)?'Activo':'Pasado'}</span>
       </div>
-      <div class="small" style="margin-top:8px">Importe máximo: ${euro(x.max_amount)} · ${x.draw_finalized?'Sorteo finalizado':'Pendiente de sorteo'}</div>
-    </a>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+        <a class="btn light" href="manage.html?id=${encodeURIComponent(x.id)}">Abrir</a>
+        <button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>
+      </div>
+    </div>
   `).join('')||'<div class="small">No hay Amigos invisibles que coincidan.</div>';
 }
 
@@ -135,6 +139,25 @@ async function createExchange(){
     });
     location.href='manage.html?id='+encodeURIComponent(d.id);
   }catch(e){alert(e.message||e)}
+}
+
+async function deleteExchange(id){
+  const x=exchanges.find(e=>e.id===id);
+  if(!x)return;
+  const ok=confirm(
+    '¿Eliminar "'+x.name+'"?\n\n'+
+    'Se borrarán el sorteo, los números de regalo, las exclusiones y sus participantes dentro del Amigo invisible.\n\n'+
+    'La reunión vinculada y sus participantes generales NO se eliminarán.\n\n'+
+    'Esta acción no se puede deshacer.'
+  );
+  if(!ok)return;
+
+  try{
+    await rpc('secret_santa_app_delete',{p_exchange_id:id});
+    await load();
+  }catch(e){
+    alert(e.message||e);
+  }
 }
 load();
 </script>
