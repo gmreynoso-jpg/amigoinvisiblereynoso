@@ -19,6 +19,7 @@
       <button id="roundBtn" class="btn primary" onclick="startOrResumeRound()">▶ Iniciar entrega</button>
       <button id="pauseBtn" class="btn light hidden" onclick="pauseDelivery()">⏸ Pausar entrega</button>
     </div>
+    <a id="editBeforeDeliveryBtn" class="btn light full hidden" style="margin-top:10px" href="#">← Volver a preparación / corregir participantes</a>
   </div>
 
   <div id="currentCard" class="card hidden" style="text-align:center">
@@ -118,6 +119,7 @@ async function load(first=false){
     data=await rpc('secret_santa_app_delivery',{p_exchange_id:exchangeId});
     rows=data.people||[];
     backBtn.href='index.html';
+    editBeforeDeliveryBtn.href='manage.html?id='+encodeURIComponent(exchangeId)+'&edit=1';
     subtitle.textContent=(data.exchange?.name||'Amigo invisible')+(data.exchange?.event_date?' · '+fmtDate(data.exchange.event_date):'');
     await ensureQueue();
     render();
@@ -149,6 +151,8 @@ function render(){
   const delivered=rows.filter(x=>!!x.delivered_at).length;
   const pending=rows.length-delivered;
   stats.textContent=`${delivered} entregado(s) de ${rows.length} · ${pending} pendiente(s)`;
+
+  editBeforeDeliveryBtn.classList.toggle('hidden',!!ex.delivery_locked||!!ex.delivery_closed_at);
 
   if(ex.delivery_closed_at){
     stateInfo.innerHTML='✅ <b>Amigo invisible cerrado.</b> Todas las entregas quedaron confirmadas.';
