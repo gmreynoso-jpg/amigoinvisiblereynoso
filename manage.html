@@ -328,7 +328,12 @@ function pairExcluded(a,b){
   );
 }
 function exclusionCount(personId){
-  return exclusions.filter(e=>e.person_a_id===personId||e.person_b_id===personId).length;
+  const activeIds=new Set(activePeople().map(p=>p.id));
+  return exclusions.filter(e=>{
+    if(e.person_a_id===personId)return activeIds.has(e.person_b_id);
+    if(e.person_b_id===personId)return activeIds.has(e.person_a_id);
+    return false;
+  }).length;
 }
 function exclusionButton(personId){
   const n=exclusionCount(personId);
