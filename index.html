@@ -87,7 +87,13 @@ function toggleFilters(){
   filterBtn.textContent=hidden?'Mostrar filtros':'Ocultar filtros';
 }
 
-function isActiveExchange(x){return x.meeting_status==='Activa'}
+function exchangeExpired(x){
+  const d=x.meeting_date||x.event_date;
+  if(!d)return false;
+  const start=new Date(d+'T'+(x.meeting_start_time||'23:59:59'));
+  return new Date()>=start;
+}
+function isActiveExchange(x){return x.meeting_status==='Activa'&&!exchangeExpired(x)}
 
 function renderList(){
   const q=(search.value||'').trim().toLowerCase();
@@ -108,11 +114,11 @@ function renderList(){
           <div class="small">${x.meeting_name?esc(x.meeting_name)+' · ':''}${fmtDate(x.meeting_date||x.event_date)}</div>
           <div class="small" style="margin-top:8px">Importe máximo: ${euro(x.max_amount)} · ${x.draw_finalized?'Sorteo finalizado':'Pendiente de sorteo'}</div>
         </div>
-        <span class="pill">${isActiveExchange(x)?'Activo':'Pasado'}</span>
+        <span class="pill">${exchangeExpired(x)?'Vencido':(isActiveExchange(x)?'Activo':'Pasado')}</span>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
         <a class="btn light" href="manage.html?id=${encodeURIComponent(x.id)}">Abrir</a>
-        <button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>
+        ${exchangeExpired(x)?'<span class="pill">Solo consulta</span>':`<button class="btn danger" onclick="deleteExchange('${x.id}')">Eliminar</button>`}
       </div>
     </div>
   `).join('')||'<div class="small">No hay Amigos invisibles que coincidan.</div>';
@@ -144,6 +150,7 @@ async function createExchange(){
 async function deleteExchange(id){
   const x=exchanges.find(e=>e.id===id);
   if(!x)return;
+  if(exchangeExpired(x))return alert('Los Amigos invisibles vencidos son solo de consulta y no se pueden eliminar.');
   const ok=confirm(
     '¿Eliminar "'+x.name+'"?\n\n'+
     'Se borrarán el sorteo, los números de regalo, las exclusiones y sus participantes dentro del Amigo invisible.\n\n'+
