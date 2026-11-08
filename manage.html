@@ -146,7 +146,9 @@
 <script>
 const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
-const exchangeId=new URLSearchParams(location.search).get('id');
+const params=new URLSearchParams(location.search);
+const exchangeId=params.get('id');
+const explicitEdit=params.get('edit')==='1';
 let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null,pendingFinalDraw=null;
 let simPreparedResult=null;
 
@@ -169,7 +171,11 @@ async function load(){
   try{
     const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
     exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];exclusions=d.exclusions||[];
-    if(exchange.delivery_prepared_at||exchange.delivery_locked||exchange.delivery_closed_at){
+    if((exchange.delivery_prepared_at||exchange.delivery_locked||exchange.delivery_closed_at)&&!explicitEdit){
+      location.replace('delivery.html?id='+encodeURIComponent(exchangeId));
+      return;
+    }
+    if(explicitEdit&&exchange.delivery_locked){
       location.replace('delivery.html?id='+encodeURIComponent(exchangeId));
       return;
     }
