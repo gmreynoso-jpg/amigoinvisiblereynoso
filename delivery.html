@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Entrega de regalos</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="top">
+      <div><h1>🎁 Entrega de regalos</h1><div id="subtitle" class="small"></div></div>
+      <a id="backBtn" class="btn light" href="index.html">← Volver</a>
+    </div>
+    <div id="lockInfo" class="small" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <div class="top">
+      <div><h2>Participantes</h2><div id="stats" class="small"></div></div>
+      <select id="scope" onchange="render()" style="width:auto">
+        <option value="pending">Pendientes</option>
+        <option value="all">Todos</option>
+        <option value="delivered">Entregados</option>
+      </select>
+    </div>
+    <div class="field"><input id="search" placeholder="Buscar participante..." oninput="render()"></div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<dialog id="revealDialog">
+  <div class="card" style="margin:0;min-width:min(520px,90vw);text-align:center">
+    <div class="small">Turno de</div>
+    <h2 id="revealName" style="font-size:30px"></h2>
+    <button id="revealBtn" class="btn primary full" onclick="revealGift()">Mostrar regalo</button>
+    <div id="giftArea" class="hidden" style="margin-top:18px">
+      <div class="small">Debe recoger</div>
+      <div id="giftValue" class="result"></div>
+      <div id="giftNote" class="small"></div>
+      <button id="markDeliveredBtn" class="btn primary full" style="margin-top:16px" onclick="markDelivered()">✓ Marcar como entregado</button>
+    </div>
+    <button class="btn light full" style="margin-top:10px" onclick="closeReveal()">Cerrar sin entregar</button>
+  </div>
+</dialog>
+
+<dialog id="firstDeliveryDialog">
+  <div class="card" style="margin:0;max-width:620px">
+    <div class="warn" style="padding:14px;border-radius:14px">
+      <h2 style="margin-top:0">⚠️ Primera entrega</h2>
+      <div><b>Al completar la primera entrega, el sorteo quedará bloqueado definitivamente.</b></div>
+      <div class="small" style="margin-top:6px">A partir de ese momento ya no se podrán cambiar participantes, regalos, exclusiones ni repetir el sorteo. Sí podrás seguir marcando entregas pendientes.</div>
+    </div>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px">
+      <input id="firstDeliveryCheck" type="checkbox" style="width:auto;margin-top:3px">
+      <span>He comprobado el resultado y quiero iniciar la entrega.</span>
+    </label>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="firstDeliveryDialog.close()">Cancelar</button>
+      <button class="btn danger" onclick="confirmFirstDelivery()">Bloquear sorteo y entregar</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+const exchangeId=new URLSearchParams(location.search).get('id');
+let data=null,rows=[],current=null;
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
+async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
+
+async function load(){
+  if(!exchangeId){location.href='index.html';return}
+  try{
+    data=await rpc('secret_santa_app_delivery',{p_exchange_id:exchangeId});
+    rows=data.people||[];
+    backBtn.href='manage.html?id='+encodeURIComponent(exchangeId);
+    subtitle.textContent=(data.exchange?.name||'Amigo invisible')+(data.exchange?.event_date?' · '+fmtDate(data.exchange.event_date):'');
+    lockInfo.innerHTML=data.exchange?.delivery_locked
+      ?'🔒 <b>Sorteo bloqueado.</b> La entrega ya ha comenzado y las asignaciones no pueden modificarse.'
+      :'🟡 El sorteo todavía puede corregirse. Quedará bloqueado al marcar la primera entrega como completada.';
+    render();
+  }catch(e){alert(e.message||e)}
+}
+
+function render(){
+  if(!data)return;
+  const q=(search.value||'').trim().toLowerCase();
+  const s=scope.value;
+  const delivered=rows.filter(x=>!!x.delivered_at).length;
+  stats.textContent=`${delivered} entregado(s) de ${rows.length} · ${rows.length-delivered} pendiente(s)`;
+  const filtered=rows.filter(x=>{
+    if(q&&!(x.person_name||'').toLowerCase().includes(q))return false;
+    if(s==='pending'&&x.delivered_at)return false;
+    if(s==='delivered'&&!x.delivered_at)return false;
+    return true;
+  });
+  list.innerHTML=filtered.map(x=>`
+    <div class="item">
+      <div>
+        <b>${esc(x.person_name)}</b>
+        <div class="small">${x.delivered_at?'✅ Entregado':'⏳ Pendiente de entrega'}${x.has_gift?' · Regalo registrado':' · Regalo físico pendiente'}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${x.delivered_at
+          ?`<button class="btn light" onclick="setPending('${x.person_id}')">Marcar pendiente</button>`
+          :`<button class="btn primary" onclick="openReveal('${x.person_id}')">Llamar / mostrar</button>`}
+      </div>
+    </div>`).join('')||'<div class="small">No hay participantes en este filtro.</div>';
+}
+
+function openReveal(id){
+  current=rows.find(x=>x.person_id===id);
+  if(!current)return;
+  revealName.textContent=current.person_name;
+  giftArea.classList.add('hidden');
+  revealBtn.classList.remove('hidden');
+  revealDialog.showModal();
+}
+function revealGift(){
+  if(!current)return;
+  revealBtn.classList.add('hidden');
+  giftArea.classList.remove('hidden');
+  if(current.gift_number!=null){
+    giftValue.textContent='#'+current.gift_number;
+    giftNote.textContent='';
+  }else{
+    giftValue.textContent='Pendiente';
+    giftNote.textContent='El regalo de esta persona todavía no está registrado. Puede entregarse posteriormente o fuera del evento.';
+  }
+}
+function closeReveal(){revealDialog.close();current=null}
+
+function markDelivered(){
+  if(!current)return;
+  if(!data.exchange.delivery_locked){
+    firstDeliveryCheck.checked=false;
+    firstDeliveryDialog.showModal();
+    return;
+  }
+  completeDelivery();
+}
+async function confirmFirstDelivery(){
+  if(!firstDeliveryCheck.checked)return alert('Marca la casilla para confirmar.');
+  firstDeliveryDialog.close();
+  await completeDelivery();
+}
+async function completeDelivery(){
+  try{
+    await rpc('secret_santa_app_set_delivered',{p_exchange_id:exchangeId,p_person_id:current.person_id,p_delivered:true});
+    revealDialog.close();
+    current=null;
+    await load();
+  }catch(e){alert(e.message||e)}
+}
+async function setPending(id){
+  if(!confirm('¿Volver a marcar esta entrega como pendiente? El sorteo seguirá bloqueado.'))return;
+  try{
+    await rpc('secret_santa_app_set_delivered',{p_exchange_id:exchangeId,p_person_id:id,p_delivered:false});
+    await load();
+  }catch(e){alert(e.message||e)}
+}
+load();
+</script>
+</body>
+</html>
