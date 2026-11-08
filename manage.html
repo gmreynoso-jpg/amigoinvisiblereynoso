@@ -47,7 +47,10 @@
     <h2>Consultar resultado individual</h2>
     <div id="resultHelp" class="small"></div>
     <div class="field"><select id="personResult"></select></div>
-    <button class="btn primary full" style="margin-top:10px" onclick="showResult()">Mostrar resultado</button>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn primary" onclick="showResult()">Mostrar resultado</button>
+      <button class="btn light" onclick="copyPersonalLink()">Copiar enlace personal</button>
+    </div>
     <div id="revealed" class="hidden" style="text-align:center;margin-top:16px">
       <div id="revealedName" style="font-weight:800"></div>
       <div id="revealedLabel" class="small"></div>
@@ -441,6 +444,19 @@ function showResult(){
     revealedNumber.textContent='#'+p.assigned_gift_number;
   }
   revealed.classList.remove('hidden');
+}
+async function copyPersonalLink(){
+  const p=people.find(x=>x.id===personResult.value);
+  if(!p)return alert('Selecciona una persona.');
+  if(!p.result_token)return alert('Este participante todavía no tiene enlace personal. Ejecuta la migración V35.');
+  const url=new URL('result.html',location.href);
+  url.search='?token='+encodeURIComponent(p.result_token);
+  try{
+    await navigator.clipboard.writeText(url.toString());
+    alert('Enlace personal copiado. Solo muestra el resultado de '+p.name+'.');
+  }catch(e){
+    prompt('Copia este enlace personal:',url.toString());
+  }
 }
 function hideResult(){revealed.classList.add('hidden');revealedName.textContent='';revealedNumber.textContent='';personResult.value=''}
 
