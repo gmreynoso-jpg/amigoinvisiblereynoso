@@ -170,7 +170,7 @@ function renderPeople(){
     peopleList.innerHTML=rows.map(p=>`
       <div class="item">
         <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
-        <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button>
+        ${exclusionButton(p.id)}
       </div>`).join('')||'<div class="small">Todavía no hay participantes.</div>';
   }else{
     const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
@@ -243,6 +243,14 @@ function pairExcluded(a,b){
     (e.person_a_id===b&&e.person_b_id===a)
   );
 }
+function exclusionCount(personId){
+  return exclusions.filter(e=>e.person_a_id===personId||e.person_b_id===personId).length;
+}
+function exclusionButton(personId){
+  const n=exclusionCount(personId);
+  return '<button class="btn '+(n>0?'warn':'light')+'" '+(exchange.draw_finalized?'disabled':'')+
+    ' onclick="openExclusions(\''+personId+'\',false)">Exclusiones · '+n+'</button>';
+}
 
 function openExclusions(personId,justRegistered=false){
   if(!ensureExchangeEditable())return;
@@ -278,6 +286,7 @@ async function saveExclusions(){
     const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
     exclusions=d.exclusions||[];
     exclusionsDialog.close();
+    renderPeople();
     renderDraw();
   }catch(e){alert(e.message||e)}
 }
