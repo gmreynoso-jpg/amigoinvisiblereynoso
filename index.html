@@ -56,9 +56,10 @@
     <div class="field">
       <label>Origen de participantes</label>
       <select id="sourceMode" onchange="updateCreateForm()">
-        <option value="meeting">Usar una reunión existente</option>
+        <option id="meetingSourceOption" value="meeting">Usar una reunión existente</option>
         <option value="independent">Crear independiente</option>
       </select>
+      <div id="sourceHelp" class="small" style="margin-top:6px"></div>
     </div>
 
     <div id="meetingArea" class="field">
@@ -146,7 +147,9 @@ function renderList(){
 
 function openCreate(){
   drawMode.value='gift_numbers';
-  sourceMode.value=availableMeetings.length?'meeting':'independent';
+  const hasMeetings=availableMeetings.length>0;
+  meetingSourceOption.disabled=!hasMeetings;
+  sourceMode.value=hasMeetings?'meeting':'independent';
   meetingSelect.innerHTML=availableMeetings.map(m=>`<option value="${m.id}">${esc(m.name)} · ${fmtDate(m.meeting_date)}</option>`).join('');
   exchangeName.value='';
   eventDate.value='';
@@ -156,14 +159,16 @@ function openCreate(){
 }
 
 function updateCreateForm(){
+  const hasMeetings=availableMeetings.length>0;
+  meetingSourceOption.disabled=!hasMeetings;
+  if(!hasMeetings&&sourceMode.value==='meeting')sourceMode.value='independent';
   const independent=sourceMode.value==='independent';
   const classic=drawMode.value==='classic';
-  meetingArea.classList.toggle('hidden',independent);
+  meetingArea.classList.toggle('hidden',independent||!hasMeetings);
   dateArea.classList.toggle('hidden',!independent);
-  if(!independent&&!availableMeetings.length){
-    sourceMode.value='independent';
-    return updateCreateForm();
-  }
+  sourceHelp.textContent=hasMeetings
+    ? (independent?'Crearás un sorteo sin vincularlo a ninguna reunión.':'Se copiarán los participantes y grupos de la reunión seleccionada.')
+    : 'No hay reuniones activas disponibles sin Amigo invisible. Puedes crear este sorteo como independiente.';
   modeHelp.textContent=classic
     ?'El sorteo se hace antes: cada persona conocerá en secreto a quién debe regalar.'
     :'Los regalos se numeran el día del encuentro y nadie sabe previamente quién recibirá cada regalo.';
