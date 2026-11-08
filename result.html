@@ -44,7 +44,7 @@ async function load(){
     resultValue.textContent=data.recipient_name||'—';
   }else{
     resultLabel.textContent='Tu regalo es el número';
-    resultValue.textContent=data.assigned_gift_number?'#'+data.assigned_gift_number:'—';
+    resultValue.textContent=data.assigned_gift_number?'#'+data.assigned_gift_number:'Pendiente de entrega';
   }
   amountInfo.textContent=Number(data.max_amount||0)>0?'Importe máximo orientativo: '+euro(data.max_amount):'';
 }
