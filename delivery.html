@@ -285,7 +285,9 @@ async function registerLateClassicGift(personId,name){
   try{
     const result=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:personId,p_brought:true});
     await load();
-    if(result?.attendance_auto_confirmed){
+    if(result?.event_participant_created){
+      alert('✅ Regalo recepcionado. '+(result.participant_name||name)+' se ha añadido automáticamente al historial del evento y consta como asistente.');
+    }else if(result?.attendance_auto_confirmed){
       alert('✅ Regalo recepcionado. La asistencia de '+(result.participant_name||name)+' al evento se ha confirmado automáticamente.');
     }
   }catch(e){alert(e.message||e)}
