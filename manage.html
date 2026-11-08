@@ -63,6 +63,11 @@
     <h2>Añadir participante</h2>
     <div class="field"><label>Nombre</label><input id="newPersonName"></div>
     <div class="field"><label>Tipo</label><select id="newPersonType"><option value="Adulto">Adulto</option><option value="Niño">Niño</option></select></div>
+    <div id="newPersonEmailField" class="field">
+      <label id="newPersonEmailLabel">Correo electrónico</label>
+      <input id="newPersonEmail" type="email" placeholder="nombre@correo.com">
+      <div id="newPersonEmailHelp" class="small" style="margin-top:5px"></div>
+    </div>
     <div class="field">
       <label>Grupo / familia · opcional</label>
       <input id="newPersonGroup" list="groupOptions" placeholder="Sin grupo">
@@ -125,6 +130,36 @@
 
 
 
+<dialog id="personDetailsDialog">
+  <div class="card" style="margin:0;min-width:min(620px,92vw)">
+    <div class="top">
+      <div><h2 id="personDetailsTitle">Datos del participante</h2><div id="personDetailsHelp" class="small"></div></div>
+      <button class="btn light" onclick="personDetailsDialog.close()">Cerrar</button>
+    </div>
+    <div class="field">
+      <label>Correo electrónico <span id="detailsEmailRequired"></span></label>
+      <input id="detailsEmail" type="email" placeholder="nombre@correo.com">
+    </div>
+    <div id="blindProfileFields">
+      <div class="grid2">
+        <div class="field"><label>Talla de ropa</label><input id="detailsClothingSize" placeholder="Ej. M, L, 42..."></div>
+        <div class="field"><label>Talla de calzado</label><input id="detailsShoeSize" placeholder="Ej. 38, 42..."></div>
+      </div>
+      <div class="field"><label>Gustos / aficiones</label><textarea id="detailsLikes" rows="3" placeholder="Música, lectura, videojuegos, cocina..."></textarea></div>
+      <div class="field"><label>No le gusta / evitar</label><textarea id="detailsDislikes" rows="2"></textarea></div>
+      <div class="field"><label>Lista de deseos</label><textarea id="detailsWishlist" rows="3" placeholder="Ideas concretas de regalo"></textarea></div>
+      <div class="field"><label>Notas adicionales</label><textarea id="detailsNotes" rows="2" placeholder="Evita incluir tu nombre o datos que te identifiquen directamente."></textarea></div>
+      <div class="warn" style="padding:10px;border-radius:12px">
+        🔐 En modo secreto esta ficha se enviará de forma anónima a quien tenga que comprar el regalo. No se mostrará tu nombre.
+      </div>
+    </div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="personDetailsDialog.close()">Cancelar</button>
+      <button class="btn primary" onclick="savePersonDetails()">Guardar datos</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="exclusionsDialog">
   <div class="card" style="margin:0;min-width:min(520px,90vw)">
     <div class="top">
@@ -156,11 +191,18 @@ const explicitEdit=params.get('edit')==='1';
 let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null,pendingFinalDraw=null;
 let simPreparedResult=null;
 let showInactive=false;
+let editingDetailsPersonId=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
 function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
 function isClassic(){return (exchange?.draw_mode||'gift_numbers')==='classic'}
+function isBlind(){return (exchange?.draw_mode||'gift_numbers')==='blind'}
+function requiresEmail(){return isClassic()||isBlind()}
+function validEmail(v){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v||'').trim())}
+function hasBlindProfile(p){
+  return [p.clothing_size,p.shoe_size,p.likes,p.dislikes,p.wishlist,p.profile_notes].some(v=>(v||'').trim());
+}
 function deliveryLocked(){return !!exchange?.delivery_locked}
 function ensureExchangeEditable(){
   if(deliveryLocked()){
@@ -190,9 +232,9 @@ async function load(){
 
 function render(){
   const classic=isClassic();
-  title.textContent=(classic?'🕵️ ':'🎁 ')+exchange.name;
+  title.textContent=(classic?'🕵️ ':isBlind()?'🔐 ':'🎁 ')+exchange.name;
   const origin=meeting?.name?'📅 '+meeting.name:'🎁 Independiente';
-  subtitle.textContent=origin+(exchange.event_date?' · '+fmtDate(exchange.event_date):'')+' · '+(classic?'Amigo invisible clásico':'Sorteo de regalos');
+  subtitle.textContent=origin+(exchange.event_date?' · '+fmtDate(exchange.event_date):'')+' · '+(classic?'Amigo invisible clásico':isBlind()?'Amigo invisible secreto / ciego':'Sorteo de regalos');
   maxAmount.value=exchange.max_amount||0;
   saveAmountBtn.disabled=deliveryLocked();
   addPersonBtn.disabled=deliveryLocked();
@@ -217,8 +259,9 @@ function renderPeople(){
 
   peopleList.innerHTML=rows.map(p=>`
     <div class="item">
-      <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'} · ${p.brought_gift?'Regalo recibido #'+p.gift_number:'Regalo pendiente'}</div></div>
+      <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'} · ${p.brought_gift?'Regalo recibido #'+p.gift_number:'Regalo pendiente'}${requiresEmail()?' · '+(p.email?'📧 '+esc(p.email):'⚠️ Email pendiente'):''}${isBlind()?' · '+(hasBlindProfile(p)?'✅ Ficha lista':'⚠️ Ficha pendiente'):''}</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+        <button class="btn light" onclick="openPersonDetails('${p.id}')">Datos / email</button>
         ${exclusionButton(p.id)}
         <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="setParticipation('${p.id}',false)">No participa</button>
         ${p.brought_gift
@@ -287,7 +330,12 @@ function openAddPerson(){
   if(!ensureExchangeEditable())return;
   newPersonName.value='';
   newPersonType.value='Adulto';
+  newPersonEmail.value='';
   newPersonGroup.value='';
+  newPersonEmailLabel.textContent=requiresEmail()?'Correo electrónico *':'Correo electrónico · opcional';
+  newPersonEmailHelp.textContent=requiresEmail()
+    ?'Obligatorio en esta modalidad porque el resultado del sorteo se enviará por correo.'
+    :'Opcional en Sorteo de regalos.';
   groupOptions.innerHTML=groups.map(g=>`<option value="${esc(g.name)}"></option>`).join('');
   groupHelp.textContent=meeting
     ?'Si indicas un grupo, debe existir en la reunión vinculada.'
@@ -298,15 +346,68 @@ function openAddPerson(){
 async function addPerson(){
   if(!ensureExchangeEditable())return;
   const name=(newPersonName.value||'').trim();
+  const email=(newPersonEmail.value||'').trim();
   if(!name)return alert('Indica el nombre.');
+  if(requiresEmail()&&!validEmail(email))return alert('Indica un correo electrónico válido. Es obligatorio en esta modalidad.');
   try{
-    const p=await rpc('secret_santa_app_add_person',{
+    const p=await rpc('secret_santa_app_add_person_v2',{
       p_exchange_id:exchangeId,
       p_name:name,
       p_group_name:(newPersonGroup.value||'').trim()||null,
-      p_type:newPersonType.value
+      p_type:newPersonType.value,
+      p_email:email||null
     });
     addPersonDialog.close();
+    await load();
+  }catch(e){alert(e.message||e)}
+}
+
+function openPersonDetails(id){
+  if(deliveryLocked())return alert('La preparación está bloqueada porque ya comenzó la entrega.');
+  const p=people.find(x=>x.id===id);
+  if(!p)return;
+  editingDetailsPersonId=id;
+  personDetailsTitle.textContent='Datos de '+p.name;
+  personDetailsHelp.textContent=isBlind()
+    ?'El correo es obligatorio. La ficha de gustos se enviará de forma anónima tras el sorteo.'
+    :isClassic()
+      ?'El correo es obligatorio porque aquí recibirá a quién tiene que regalar.'
+      :'El correo es opcional en Sorteo de regalos.';
+  detailsEmailRequired.textContent=requiresEmail()?'*':'';
+  detailsEmail.value=p.email||'';
+  detailsClothingSize.value=p.clothing_size||'';
+  detailsShoeSize.value=p.shoe_size||'';
+  detailsLikes.value=p.likes||'';
+  detailsDislikes.value=p.dislikes||'';
+  detailsWishlist.value=p.wishlist||'';
+  detailsNotes.value=p.profile_notes||'';
+  blindProfileFields.classList.toggle('hidden',!isBlind());
+  personDetailsDialog.showModal();
+}
+
+async function savePersonDetails(){
+  if(!editingDetailsPersonId)return;
+  const email=(detailsEmail.value||'').trim();
+  if(requiresEmail()&&!validEmail(email))return alert('Indica un correo electrónico válido.');
+  if(isBlind()){
+    const profile=[detailsClothingSize.value,detailsShoeSize.value,detailsLikes.value,detailsDislikes.value,detailsWishlist.value,detailsNotes.value]
+      .some(v=>(v||'').trim());
+    if(!profile)return alert('Añade al menos un dato de gustos, talla o lista de deseos para el modo secreto.');
+  }
+  try{
+    await rpc('secret_santa_app_update_person_details',{
+      p_exchange_id:exchangeId,
+      p_person_id:editingDetailsPersonId,
+      p_email:email||null,
+      p_clothing_size:(detailsClothingSize.value||'').trim()||null,
+      p_shoe_size:(detailsShoeSize.value||'').trim()||null,
+      p_likes:(detailsLikes.value||'').trim()||null,
+      p_dislikes:(detailsDislikes.value||'').trim()||null,
+      p_wishlist:(detailsWishlist.value||'').trim()||null,
+      p_profile_notes:(detailsNotes.value||'').trim()||null
+    });
+    personDetailsDialog.close();
+    editingDetailsPersonId=null;
     await load();
   }catch(e){alert(e.message||e)}
 }
@@ -392,7 +493,7 @@ function shuffled(a){
 
 function drawPool(){
   const active=activePeople();
-  return isClassic()?active:active.filter(p=>p.brought_gift&&p.gift_number!=null);
+  return (isClassic()||isBlind())?active:active.filter(p=>p.brought_gift&&p.gift_number!=null);
 }
 
 function calcMatching(){
@@ -444,15 +545,34 @@ function calcMatching(){
   return best;
 }
 
-function simulate(){
+async function simulate(){
   if(!ensureExchangeEditable())return;
+  const active=activePeople();
+  if(requiresEmail()){
+    const missingEmail=active.filter(p=>!validEmail(p.email));
+    if(missingEmail.length)return alert('Falta un correo válido en: '+missingEmail.map(p=>p.name).join(', '));
+  }
+  if(isBlind()){
+    const missingProfile=active.filter(p=>!hasBlindProfile(p));
+    if(missingProfile.length)return alert('Falta completar la ficha anónima de: '+missingProfile.map(p=>p.name).join(', '));
+    try{
+      const r=await rpc('secret_santa_app_simulate_blind',{p_exchange_id:exchangeId});
+      simPreparedResult={blind:true,count:r.participant_count,sameGroupConflicts:r.same_group_conflicts};
+      simDoneSummary.innerHTML='Participantes incluidos: <b>'+r.participant_count+'</b><br>'+
+        'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
+        'Cruces de grupo/familia mínimos encontrados: <b>'+r.same_group_conflicts+'</b><br>'+
+        '<div class="ok" style="margin-top:8px">🔒 La simulación no revela ninguna pareja.</div>';
+      simDoneDialog.showModal();
+    }catch(e){alert(e.message||e)}
+    return;
+  }
+
   const pool=drawPool();
   const count=pool.length;
   if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 participantes que hayan entregado regalo.');
   const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
 
-  const active=activePeople();
   const missing=isClassic()?active.filter(p=>!p.brought_gift||p.gift_number==null).length:0;
   const excludedNoGift=isClassic()?0:active.length-count;
 
@@ -466,10 +586,14 @@ function simulate(){
       :'Fuera del sorteo por no traer regalo: <b>'+excludedNoGift+'</b>');
   simDoneDialog.showModal();
 }
-
 function startSimDelivery(){
   const r=simPreparedResult;
   if(!r)return;
+  if(r.blind){
+    simDoneDialog.close();
+    alert('La simulación secreta ha comprobado que el sorteo es viable sin revelar ninguna asignación. La entrega solo se simulará después de realizar un sorteo real.');
+    return;
+  }
   const payload={
     exchangeId,
     name:exchange?.name||'Simulación',
@@ -484,17 +608,37 @@ function startSimDelivery(){
   simDoneDialog.close();
   location.href='simulation.html?id='+encodeURIComponent(exchangeId);
 }
-function finalizeDraw(){
+async function finalizeDraw(){
   if(!ensureExchangeEditable())return;
+  const active=activePeople();
+
+  if(requiresEmail()){
+    const missingEmail=active.filter(p=>!validEmail(p.email));
+    if(missingEmail.length)return alert('No se puede sortear. Falta un correo válido en: '+missingEmail.map(p=>p.name).join(', '));
+  }
+  if(isBlind()){
+    const missingProfile=active.filter(p=>!hasBlindProfile(p));
+    if(missingProfile.length)return alert('No se puede sortear. Falta completar la ficha anónima de: '+missingProfile.map(p=>p.name).join(', '));
+    if(active.length<2)return alert('Se necesitan al menos 2 participantes.');
+    if(!confirm('¿Realizar el sorteo secreto?\n\nLas parejas se generarán exclusivamente en el backend y no se mostrarán al organizador. Después se enviarán las fichas anónimas por correo.'))return;
+    try{
+      const r=await rpc('secret_santa_app_finalize_blind',{p_exchange_id:exchangeId});
+      await load();
+      await sendDrawEmails();
+      alert('✅ Sorteo secreto realizado. Las asignaciones permanecen ocultas. Se ha iniciado el envío de correos.');
+    }catch(e){alert(e.message||e)}
+    return;
+  }
+
   const pool=drawPool();
   const count=pool.length;
   if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 participantes que hayan entregado regalo.');
   const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
   pendingFinalDraw=r;
-  const missingGifts=isClassic()?activePeople().filter(p=>!p.brought_gift||p.gift_number==null):[];
+  const missingGifts=isClassic()?active.filter(p=>!p.brought_gift||p.gift_number==null):[];
   finalDrawWarning.textContent=(isClassic()
-    ?'Se guardará quién regala a quién.'
+    ?'Se guardará quién regala a quién y, tras confirmar, cada participante recibirá su resultado por correo.'
     :'Solo entran en el sorteo las personas que han entregado un regalo. Se guardará qué regalo corresponde a cada una.')+
     ' Podrás corregir datos o repetir el sorteo hasta que marques la primera entrega como completada.'+
     (missingGifts.length?' Hay '+missingGifts.length+' participante(s) sin regalo registrado; podrán entregarlo después o fuera del evento.':'');
@@ -502,7 +646,7 @@ function finalizeDraw(){
   finalDrawSummary.innerHTML=
     '<b>Resumen antes de guardar</b><br>'+
     (isClassic()?'Participantes en el sorteo: <b>'+count+'</b><br>':'Participantes con regalo que entran en el sorteo: <b>'+count+'</b><br>')+
-    'Regalos registrados: <b>'+people.filter(p=>p.brought_gift&&p.gift_number!=null).length+'</b><br>'+
+    'Regalos registrados: <b>'+active.filter(p=>p.brought_gift&&p.gift_number!=null).length+'</b><br>'+
     'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
     'Cruces de grupo/familia: <b>'+r.sameGroupConflicts+'</b>'+
     (r.sameGroupConflicts>0
@@ -511,7 +655,6 @@ function finalizeDraw(){
   finalDrawCheck.checked=false;
   finalDrawDialog.showModal();
 }
-
 async function confirmFinalDraw(){
   if(!pendingFinalDraw)return finalDrawDialog.close();
   if(!finalDrawCheck.checked)return alert('Marca la casilla para confirmar que has revisado los datos.');
@@ -525,6 +668,7 @@ async function confirmFinalDraw(){
     pendingFinalDraw=null;
     finalDrawDialog.close();
     await load();
+    if(isClassic())await sendDrawEmails();
     const eligible=drawPool();
     drawDoneSummary.innerHTML=
       'Participantes incluidos: <b>'+eligible.length+'</b><br>'+
@@ -533,6 +677,18 @@ async function confirmFinalDraw(){
       'Cruces de grupo/familia: <b>'+Number(savedResult?.sameGroupConflicts||0)+'</b>';
     drawDoneDialog.showModal();
   }catch(e){alert(e.message||e)}
+}
+
+async function sendDrawEmails(){
+  try{
+    const {data,error}=await sb.functions.invoke('send-secret-santa-notifications',{body:{exchange_id:exchangeId}});
+    if(error)throw error;
+    return data;
+  }catch(e){
+    console.error(e);
+    alert('⚠️ El sorteo se ha guardado, pero no se pudieron enviar todos los correos. Revisa la configuración de la función de correo antes de continuar.');
+    return null;
+  }
 }
 
 function startRealDelivery(){
@@ -547,18 +703,20 @@ function renderDraw(){
   const active=activePeople();
   const gifts=active.filter(p=>p.brought_gift&&p.gift_number!=null).length;
   drawInfo.textContent=classic
-    ?`Participan ${eligible.length} personas · ${gifts} regalo(s) registrados · ${exclusions.length} exclusión(es). El sorteo indica en secreto quién regala a quién.`
-    :`Entran en el sorteo ${eligible.length} personas porque han entregado regalo · ${people.length-eligible.length} persona(s) quedan fuera por no haberlo entregado · ${exclusions.length} exclusión(es).`;
+    ?`Participan ${eligible.length} personas · ${gifts} regalo(s) registrados · ${exclusions.length} exclusión(es). Cada resultado se enviará por correo.`
+    :isBlind()
+      ?`Participan ${eligible.length} personas · ${exclusions.length} exclusión(es). El emparejamiento se realiza en backend y las parejas no se muestran al organizador. Cada persona recibirá por correo una ficha anónima.`
+      :`Entran en el sorteo ${eligible.length} personas porque han entregado regalo · ${active.length-eligible.length} participante(s) activo(s) quedan fuera por no haberlo entregado · ${exclusions.length} exclusión(es).`;
   simulateBtn.disabled=locked;
   finalBtn.classList.toggle('hidden',locked);
   finalBtn.textContent=exchange.draw_finalized?'🔄 Rehacer sorteo':'🎲 Realizar sorteo';
-  resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
+  resultsCard.classList.toggle('hidden',!exchange.draw_finalized||isBlind());
 
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
     finalStatus.className='ok';
     finalStatus.innerHTML='✅ <b>Sorteo realizado.</b> Todavía puedes rehacerlo mientras no comiences una entrega real.<br><a class="btn primary" style="display:inline-block;margin-top:10px" href="delivery.html?id='+encodeURIComponent(exchangeId)+'&start=1">Ir a entrega de regalos →</a>';
-    personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    if(!isBlind())personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
     resultHelp.textContent=classic
       ?'Consulta privada de a quién debe regalar cada participante.'
       :'Consulta privada del número de regalo asignado. En este modo solo participan quienes han entregado regalo.';
