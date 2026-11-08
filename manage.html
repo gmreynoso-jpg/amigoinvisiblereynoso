@@ -219,10 +219,8 @@ async function addPerson(){
       p_group_name:(newPersonGroup.value||'').trim()||null,
       p_type:newPersonType.value
     });
-    people.push(p);
-    if(!meeting&&p.group_name&&!groups.some(g=>g.name===p.group_name))groups.push({id:null,name:p.group_name});
     addPersonDialog.close();
-    render();
+    await load();
   }catch(e){alert(e.message||e)}
 }
 
@@ -258,7 +256,7 @@ function openExclusions(personId,justRegistered=false){
   exclusionSearch.value='';
   const p=people.find(x=>x.id===personId);
   exclusionsTitle.textContent=justRegistered?'✅ Regalo registrado':'Editar exclusiones';
-  exclusionsGiftInfo.textContent=p?(p.name+(!isClassic()&&p.gift_number!=null?' · Regalo #'+p.gift_number:'')):'';
+  exclusionsGiftInfo.textContent=p?(p.name+(p.gift_number!=null?' · Regalo #'+p.gift_number:'')):'';
   renderExclusionOptions();
   exclusionsDialog.showModal();
 }
@@ -284,10 +282,9 @@ async function saveExclusions(){
       p_excluded_person_ids:ids
     });
     const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
-    exclusions=d.exclusions||[];
+    exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];exclusions=d.exclusions||[];
     exclusionsDialog.close();
-    renderPeople();
-    renderDraw();
+    render();
   }catch(e){alert(e.message||e)}
 }
 
@@ -377,7 +374,7 @@ function finalizeDraw(){
     (missingGifts.length?' Hay '+missingGifts.length+' participante(s) sin regalo registrado; podrán entregarlo después o fuera del evento.':'');
   finalDrawCheckText.textContent='He revisado los participantes y exclusiones y quiero guardar este sorteo.';
   finalDrawSummary.innerHTML=
-    '<b>Resumen antes de cerrar</b><br>'+
+    '<b>Resumen antes de guardar</b><br>'+
     'Participantes: <b>'+count+'</b><br>'+
     'Regalos registrados: <b>'+people.filter(p=>p.brought_gift&&p.gift_number!=null).length+'</b><br>'+
     'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
