@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simulación de entrega</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="top">
+      <div><h1>🧪 Simulación de entrega</h1><div id="subtitle" class="small"></div></div>
+      <a id="backBtn" class="btn light" href="index.html">← Salir</a>
+    </div>
+    <div id="stateInfo" class="small" style="margin-top:10px"></div>
+    <div class="grid2" style="margin-top:12px">
+      <button id="pauseBtn" class="btn light" onclick="togglePause()">⏸ Pausar</button>
+      <button class="btn light" onclick="showAll=!showAll;render()">Ver / ocultar listado</button>
+    </div>
+  </div>
+
+  <div id="currentCard" class="card" style="text-align:center">
+    <div class="small">Siguiente participante</div>
+    <h2 id="currentName" style="font-size:34px;margin:10px 0"></h2>
+    <div id="currentStatus" class="small"></div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="skipCurrent()">Saltar por ahora</button>
+      <button class="btn primary" onclick="openReveal()">Llamar / mostrar regalo</button>
+    </div>
+  </div>
+
+  <div id="summaryCard" class="card">
+    <div class="top"><div><h2>Estado simulado</h2><div id="stats" class="small"></div></div></div>
+    <div id="list"></div>
+    <div id="doneBox" class="hidden ok" style="padding:14px;border-radius:14px;margin-top:12px">
+      ✅ Todos los participantes de la simulación constan como entregados.
+    </div>
+  </div>
+</div>
+
+<dialog id="revealDialog">
+  <div class="card" style="margin:0;min-width:min(520px,90vw);text-align:center">
+    <div class="small">Turno de</div>
+    <h2 id="revealName" style="font-size:30px"></h2>
+    <button id="revealBtn" class="btn primary full" onclick="revealGift()">Mostrar regalo</button>
+    <div id="giftArea" class="hidden" style="margin-top:18px">
+      <div class="small">Debe recoger</div>
+      <div id="giftValue" class="result"></div>
+      <div id="giftNote" class="small"></div>
+      <button class="btn primary full" style="margin-top:16px" onclick="markDelivered()">✓ Marcar como entregado</button>
+    </div>
+    <button class="btn light full" style="margin-top:10px" onclick="closeReveal()">Cerrar sin entregar</button>
+  </div>
+</dialog>
+
+<script>
+const exchangeId=new URLSearchParams(location.search).get('id');
+const key='secretSantaSimulation:'+exchangeId;
+let sim=null,current=null,showAll=false;
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function shuffled(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
+function save(){localStorage.setItem(key,JSON.stringify(sim))}
+function load(){
+  try{sim=JSON.parse(localStorage.getItem(key)||'null')}catch(e){}
+  if(!sim||!Array.isArray(sim.rows)){alert('No hay una simulación activa.');location.href='manage.html?id='+encodeURIComponent(exchangeId);return}
+  if(!sim.queue){
+    sim.queue=shuffled(sim.rows.map(x=>x.person_id));
+    sim.delivered=[];
+    sim.paused=false;
+    sim.current_person_id=sim.queue[0]||null;
+    sim.revealed=false;
+    save();
+  }
+  backBtn.href='manage.html?id='+encodeURIComponent(exchangeId);
+  subtitle.textContent=sim.name||'Simulación';
+  restoreExactPoint();
+  render();
+}
+function pendingIds(){return sim.queue.filter(id=>!sim.delivered.includes(id))}
+function row(id){return sim.rows.find(x=>x.person_id===id)}
+function render(){
+  const delivered=sim.delivered.length,pending=sim.rows.length-delivered;
+  stats.textContent=`${delivered} entregado(s) de ${sim.rows.length} · ${pending} pendiente(s)`;
+  stateInfo.textContent=sim.paused?'⏸ Simulación pausada. Puedes salir y volver sin perder este punto.':'▶ Simulación en curso. Nada de esto modifica datos reales.';
+  pauseBtn.textContent=sim.paused?'▶ Reanudar':'⏸ Pausar';
+
+  const pids=pendingIds();
+  if(!sim.current_person_id||!pids.includes(sim.current_person_id))sim.current_person_id=pids[0]||null;
+  const r=row(sim.current_person_id);
+  if(sim.paused||!r){currentCard.classList.add('hidden')}else{
+    currentCard.classList.remove('hidden');
+    currentName.textContent=r.person_name;
+    currentStatus.textContent=r.has_gift?'Regalo preparado':'Regalo físico pendiente';
+  }
+  const rowsToShow=showAll?sim.rows:pids.map(row);
+  list.innerHTML=rowsToShow.map(x=>`<div class="item"><div><b>${esc(x.person_name)}</b><div class="small">${sim.delivered.includes(x.person_id)?'✅ Entregado':'⏳ Pendiente'}${x.gift_number!=null?' · Regalo #'+x.gift_number:' · Regalo físico pendiente'}</div></div></div>`).join('');
+  doneBox.classList.toggle('hidden',pending!==0);
+  save();
+}
+function togglePause(){sim.paused=!sim.paused;sim.revealed=false;save();render()}
+function skipCurrent(){
+  if(!sim.current_person_id)return;
+  const id=sim.current_person_id;
+  sim.queue=sim.queue.filter(x=>x!==id);sim.queue.push(id);
+  sim.current_person_id=pendingIds()[0]||null;sim.revealed=false;save();render();
+}
+function openReveal(){
+  current=row(sim.current_person_id);if(!current)return;
+  revealName.textContent=current.person_name;
+  if(sim.revealed){revealBtn.classList.add('hidden');giftArea.classList.remove('hidden');showGift()}
+  else{revealBtn.classList.remove('hidden');giftArea.classList.add('hidden')}
+  revealDialog.showModal();
+}
+function revealGift(){sim.revealed=true;save();revealBtn.classList.add('hidden');giftArea.classList.remove('hidden');showGift()}
+function showGift(){
+  if(current.gift_number!=null){giftValue.textContent='#'+current.gift_number;giftNote.textContent=''}
+  else{giftValue.textContent='Pendiente';giftNote.textContent='En la entrega real no se podría marcar como entregado hasta registrar físicamente este regalo.'}
+}
+function markDelivered(){
+  if(!current||current.gift_number==null)return alert('Este regalo todavía está pendiente físicamente.');
+  if(!sim.delivered.includes(current.person_id))sim.delivered.push(current.person_id);
+  sim.revealed=false;sim.current_person_id=pendingIds()[0]||null;save();revealDialog.close();current=null;render();
+}
+function closeReveal(){sim.revealed=false;save();revealDialog.close();current=null;render()}
+function restoreExactPoint(){
+  if(sim.paused||!sim.current_person_id||!sim.revealed)return;
+  current=row(sim.current_person_id);
+  if(!current)return;
+  setTimeout(()=>openReveal(),0);
+}
+load();
+</script>
+</body>
+</html>
