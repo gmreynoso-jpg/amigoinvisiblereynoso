@@ -179,7 +179,7 @@ async function addPerson(){if(!ensureExchangeEditable())return;
     render();
   }catch(e){alert(e.message||e)}
 }
-async function setGift(id,brought){
+async function setGift(id,brought){if(!ensureExchangeEditable())return;
   try{
     const r=await rpc('secret_santa_app_set_gift',{
       p_exchange_id:exchangeId,
@@ -288,7 +288,7 @@ function renderDraw(){
   drawInfo.textContent=`Participan ${eligible.length} personas con regalo · ${exclusions.length} exclusión(es) configurada(s).`;
   simulateBtn.disabled=exchange.draw_finalized;
   finalBtn.classList.toggle('hidden',exchange.draw_finalized);
-  resetBtn.classList.toggle('hidden',!exchange.draw_finalized);
+  resetBtn.classList.add('hidden');
   resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
