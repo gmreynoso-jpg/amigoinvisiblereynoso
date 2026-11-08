@@ -601,7 +601,9 @@ begin
         'delivered_at',recipient.delivered_at,
         'delivery_order',recipient.delivery_order,
         'gift_number',giver.gift_number,
-        'has_gift',coalesce(giver.brought_gift,false) and giver.gift_number is not null
+        'has_gift',coalesce(giver.brought_gift,false) and giver.gift_number is not null,
+        'gift_owner_id',giver.id,
+        'gift_owner_name',giver.name
       )
       order by recipient.delivery_order nulls last,recipient.name
     ),'[]'::jsonb)
@@ -619,7 +621,9 @@ begin
         'delivered_at',receiver.delivered_at,
         'delivery_order',receiver.delivery_order,
         'gift_number',gift_owner.gift_number,
-        'has_gift',true
+        'has_gift',true,
+        'gift_owner_id',gift_owner.id,
+        'gift_owner_name',gift_owner.name
       )
       order by receiver.delivery_order nulls last,receiver.name
     ),'[]'::jsonb)
