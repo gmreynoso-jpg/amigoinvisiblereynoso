@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mi ficha de Amigo invisible</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app" style="max-width:720px">
+  <div class="card">
+    <h1>🔐 Mi ficha de regalo</h1>
+    <div id="status" class="small">Cargando...</div>
+    <div id="formArea" class="hidden">
+      <div id="exchangeInfo" class="small"></div>
+      <h2 id="personName"></h2>
+      <div class="warn" style="padding:12px;border-radius:12px;margin-bottom:14px">
+        Esta ficha se enviará de forma anónima a la persona que tenga que comprarte el regalo. Evita escribir tu nombre o datos que te identifiquen directamente.
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Talla de ropa</label><input id="clothingSize" placeholder="Ej. M, L, 42..."></div>
+        <div class="field"><label>Talla de calzado</label><input id="shoeSize" placeholder="Ej. 38, 42..."></div>
+      </div>
+      <div class="field"><label>Gustos / aficiones</label><textarea id="likes" rows="3" placeholder="Música, lectura, videojuegos, cocina..."></textarea></div>
+      <div class="field"><label>No me gusta / evitar</label><textarea id="dislikes" rows="2"></textarea></div>
+      <div class="field"><label>Lista de deseos</label><textarea id="wishlist" rows="3" placeholder="Ideas concretas de regalo"></textarea></div>
+      <div class="field"><label>Notas adicionales</label><textarea id="profileNotes" rows="2"></textarea></div>
+      <button id="saveBtn" class="btn primary full" onclick="saveProfile()">Guardar mi ficha</button>
+      <div id="savedMsg" class="ok hidden" style="padding:12px;border-radius:12px;margin-top:12px">✅ Ficha guardada correctamente.</div>
+    </div>
+  </div>
+</div>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+const token=new URLSearchParams(location.search).get('token');
+
+function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
+function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
+
+async function load(){
+  if(!token){status.textContent='Enlace personal no válido.';return}
+  const {data,error}=await sb.rpc('secret_santa_profile_get',{p_token:token});
+  if(error){status.textContent=error.message||'No se pudo cargar la ficha.';return}
+
+  status.classList.add('hidden');
+  formArea.classList.remove('hidden');
+  exchangeInfo.textContent=(data.exchange_name||'Amigo invisible')+(data.event_date?' · '+fmtDate(data.event_date):'')+(Number(data.max_amount||0)>0?' · Máximo '+euro(data.max_amount):'');
+  personName.textContent=data.person_name||'';
+  clothingSize.value=data.clothing_size||'';
+  shoeSize.value=data.shoe_size||'';
+  likes.value=data.likes||'';
+  dislikes.value=data.dislikes||'';
+  wishlist.value=data.wishlist||'';
+  profileNotes.value=data.profile_notes||'';
+
+  if(data.draw_finalized){
+    [clothingSize,shoeSize,likes,dislikes,wishlist,profileNotes,saveBtn].forEach(x=>x.disabled=true);
+    savedMsg.classList.remove('hidden');
+    savedMsg.textContent='🔒 El sorteo ya se ha realizado. Tu ficha queda cerrada.';
+  }
+}
+
+async function saveProfile(){
+  const any=[clothingSize.value,shoeSize.value,likes.value,dislikes.value,wishlist.value,profileNotes.value].some(v=>(v||'').trim());
+  if(!any)return alert('Añade al menos un dato de gustos, talla o lista de deseos.');
+  const {error}=await sb.rpc('secret_santa_profile_save',{
+    p_token:token,
+    p_clothing_size:(clothingSize.value||'').trim()||null,
+    p_shoe_size:(shoeSize.value||'').trim()||null,
+    p_likes:(likes.value||'').trim()||null,
+    p_dislikes:(dislikes.value||'').trim()||null,
+    p_wishlist:(wishlist.value||'').trim()||null,
+    p_profile_notes:(profileNotes.value||'').trim()||null
+  });
+  if(error)return alert(error.message||error);
+  savedMsg.classList.remove('hidden');
+  savedMsg.textContent='✅ Ficha guardada correctamente.';
+}
+load();
+</script>
+</body>
+</html>
