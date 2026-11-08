@@ -22,7 +22,7 @@
 
   <div class="card">
     <div class="top">
-      <div><h2>Recepción de regalos</h2><div id="stats" class="small"></div></div>
+      <div><h2 id="peopleTitle">Participantes</h2><div id="stats" class="small"></div></div>
       <button id="addPersonBtn" class="btn light" onclick="openAddPerson()">+ Añadir participante</button>
     </div>
     <div class="field"><input id="search" placeholder="Buscar participante..." oninput="renderPeople()"></div>
@@ -40,18 +40,17 @@
       <div id="simResults"></div>
     </div>
     <button id="finalBtn" class="btn primary full" style="margin-top:12px" onclick="finalizeDraw()">🎲 Sorteo definitivo</button>
-    <button id="resetBtn" class="btn danger full hidden" style="margin-top:8px" onclick="resetDraw()">Reiniciar sorteo</button>
     <div id="finalStatus" class="hidden" style="margin-top:12px"></div>
   </div>
 
   <div id="resultsCard" class="card hidden">
     <h2>Consultar resultado individual</h2>
-    <div class="small">Solo se muestra el número del regalo.</div>
+    <div id="resultHelp" class="small"></div>
     <div class="field"><select id="personResult"></select></div>
-    <button class="btn primary full" style="margin-top:10px" onclick="showResult()">Mostrar número</button>
+    <button class="btn primary full" style="margin-top:10px" onclick="showResult()">Mostrar resultado</button>
     <div id="revealed" class="hidden" style="text-align:center;margin-top:16px">
       <div id="revealedName" style="font-weight:800"></div>
-      <div class="small">Tu regalo es el número</div>
+      <div id="revealedLabel" class="small"></div>
       <div id="revealedNumber" class="result"></div>
       <button class="btn light" onclick="hideResult()">Ocultar</button>
     </div>
@@ -63,7 +62,12 @@
     <h2>Añadir participante</h2>
     <div class="field"><label>Nombre</label><input id="newPersonName"></div>
     <div class="field"><label>Tipo</label><select id="newPersonType"><option value="Adulto">Adulto</option><option value="Niño">Niño</option></select></div>
-    <div class="field"><label>Grupo</label><select id="newPersonGroup"><option value="">Sin grupo</option></select></div>
+    <div class="field">
+      <label>Grupo / familia · opcional</label>
+      <input id="newPersonGroup" list="groupOptions" placeholder="Sin grupo">
+      <datalist id="groupOptions"></datalist>
+      <div id="groupHelp" class="small" style="margin-top:5px"></div>
+    </div>
     <div class="grid2" style="margin-top:14px">
       <button class="btn light" onclick="addPersonDialog.close()">Cancelar</button>
       <button class="btn primary" onclick="addPerson()">Añadir</button>
@@ -76,12 +80,12 @@
     <div class="warn" style="padding:14px;border-radius:14px">
       <h2 style="margin-top:0">⚠️ Sorteo definitivo</h2>
       <div><b>Esta acción cierra el Amigo invisible.</b></div>
-      <div class="small" style="margin-top:6px">Después no se podrán cambiar participantes, regalos, números, exclusiones ni el importe máximo, ni repetir el sorteo.</div>
+      <div id="finalDrawWarning" class="small" style="margin-top:6px"></div>
     </div>
     <div id="finalDrawSummary" class="sim" style="margin-top:12px"></div>
     <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px">
       <input id="finalDrawCheck" type="checkbox" style="width:auto;margin-top:3px">
-      <span>He revisado los participantes, regalos y exclusiones y quiero cerrar el sorteo.</span>
+      <span id="finalDrawCheckText">He revisado los datos y quiero cerrar el sorteo.</span>
     </label>
     <div class="grid2" style="margin-top:14px">
       <button class="btn light" onclick="finalDrawDialog.close()">Cancelar</button>
@@ -94,14 +98,14 @@
   <div class="card" style="margin:0;min-width:min(520px,90vw)">
     <div class="top">
       <div>
-        <h2 id="exclusionsTitle">Regalo registrado</h2>
+        <h2 id="exclusionsTitle">Editar exclusiones</h2>
         <div id="exclusionsGiftInfo" class="small"></div>
       </div>
       <button class="btn light" onclick="exclusionsDialog.close()">Cerrar</button>
     </div>
     <div style="margin-top:14px">
       <b>No emparejar con</b>
-      <div class="small">Opcional. Estas exclusiones son bidireccionales y solo afectan a este Amigo invisible.</div>
+      <div class="small">Estas exclusiones son estrictas y bidireccionales. El sistema nunca emparejará a estas dos personas.</div>
       <input id="exclusionSearch" placeholder="Buscar persona..." oninput="renderExclusionOptions()" style="margin-top:10px">
       <div id="exclusionOptions" style="max-height:320px;overflow:auto;margin-top:8px"></div>
     </div>
@@ -116,11 +120,12 @@
 const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
 const exchangeId=new URLSearchParams(location.search).get('id');
-let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null;
+let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null,pendingFinalDraw=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
 function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
+function isClassic(){return (exchange?.draw_mode||'gift_numbers')==='classic'}
 function ensureExchangeEditable(){
   if(exchange?.draw_finalized){
     alert('El sorteo definitivo ya está realizado. Este Amigo invisible está cerrado y es solo de consulta.');
@@ -138,73 +143,90 @@ async function load(){
     render();
   }catch(e){alert(e.message||e)}
 }
+
 function render(){
-  title.textContent='🎁 '+exchange.name;
-  subtitle.textContent=(meeting?.name?meeting.name+' · ':'')+fmtDate(exchange.event_date);
+  const classic=isClassic();
+  title.textContent=(classic?'🕵️ ':'🎁 ')+exchange.name;
+  const origin=meeting?.name?'📅 '+meeting.name:'🎁 Independiente';
+  subtitle.textContent=origin+(exchange.event_date?' · '+fmtDate(exchange.event_date):'')+' · '+(classic?'Amigo invisible clásico':'Sorteo de regalos');
   maxAmount.value=exchange.max_amount||0;
   saveAmountBtn.disabled=exchange.draw_finalized;
   addPersonBtn.disabled=exchange.draw_finalized;
   maxAmount.disabled=exchange.draw_finalized;
-  if(exchange.draw_finalized){
-    subtitle.textContent+=(subtitle.textContent?' · ':'')+'Cerrado · Sorteo definitivo';
-  }
-  renderPeople();renderDraw();
+  peopleTitle.textContent=classic?'Participantes':'Recepción de regalos';
+  if(exchange.draw_finalized)subtitle.textContent+=' · Cerrado';
+  renderPeople();
+  renderDraw();
 }
+
 function renderPeople(){
   const q=(search.value||'').trim().toLowerCase();
   const rows=people.filter(p=>!q||(p.name||'').toLowerCase().includes(q));
-  const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
-  document.getElementById('stats').textContent=`${gifts} regalos recibidos de ${people.length} participantes`;
-  document.getElementById('peopleList').innerHTML=rows.map(p=>`
-    <div class="item">
-      <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
-      <div>
-        ${p.brought_gift
-          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
-          : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Trae regalo</button>`}
-      </div>
-    </div>`).join('');
+  if(isClassic()){
+    stats.textContent=people.length+' participante(s)';
+    peopleList.innerHTML=rows.map(p=>`
+      <div class="item">
+        <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
+        <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button>
+      </div>`).join('')||'<div class="small">Todavía no hay participantes.</div>';
+  }else{
+    const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
+    stats.textContent=`${gifts} regalos recibidos de ${people.length} participantes`;
+    peopleList.innerHTML=rows.map(p=>`
+      <div class="item">
+        <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
+        <div>
+          ${p.brought_gift
+            ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
+            : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Trae regalo</button>`}
+        </div>
+      </div>`).join('')||'<div class="small">Todavía no hay participantes.</div>';
+  }
 }
-async function saveAmount(){if(!ensureExchangeEditable())return;
+
+async function saveAmount(){
+  if(!ensureExchangeEditable())return;
   try{
-    await rpc('secret_santa_app_set_max_amount',{
-      p_exchange_id:exchangeId,
-      p_max_amount:Number(maxAmount.value||0)
-    });
+    await rpc('secret_santa_app_set_max_amount',{p_exchange_id:exchangeId,p_max_amount:Number(maxAmount.value||0)});
     exchange.max_amount=Number(maxAmount.value||0);
     alert('Importe máximo guardado.');
   }catch(e){alert(e.message||e)}
 }
-function openAddPerson(){if(!ensureExchangeEditable())return;
-  if(exchange.draw_finalized)return;
+
+function openAddPerson(){
+  if(!ensureExchangeEditable())return;
   newPersonName.value='';
   newPersonType.value='Adulto';
-  newPersonGroup.innerHTML='<option value="">Sin grupo</option>'+
-    groups.map(g=>`<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('');
+  newPersonGroup.value='';
+  groupOptions.innerHTML=groups.map(g=>`<option value="${esc(g.name)}"></option>`).join('');
+  groupHelp.textContent=meeting
+    ?'Si indicas un grupo, debe existir en la reunión vinculada.'
+    :'Puedes escribir cualquier grupo o familia para ayudar a evitar emparejamientos dentro del mismo grupo.';
   addPersonDialog.showModal();
 }
-async function addPerson(){if(!ensureExchangeEditable())return;
+
+async function addPerson(){
+  if(!ensureExchangeEditable())return;
   const name=(newPersonName.value||'').trim();
   if(!name)return alert('Indica el nombre.');
   try{
     const p=await rpc('secret_santa_app_add_person',{
       p_exchange_id:exchangeId,
       p_name:name,
-      p_group_name:newPersonGroup.value||null,
+      p_group_name:(newPersonGroup.value||'').trim()||null,
       p_type:newPersonType.value
     });
     people.push(p);
+    if(!meeting&&p.group_name&&!groups.some(g=>g.name===p.group_name))groups.push({id:null,name:p.group_name});
     addPersonDialog.close();
     render();
   }catch(e){alert(e.message||e)}
 }
-async function setGift(id,brought){if(!ensureExchangeEditable())return;
+
+async function setGift(id,brought){
+  if(!ensureExchangeEditable())return;
   try{
-    const r=await rpc('secret_santa_app_set_gift',{
-      p_exchange_id:exchangeId,
-      p_person_id:id,
-      p_brought:brought
-    });
+    const r=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
     const p=people.find(x=>x.id===id);
     if(p){p.brought_gift=r.brought_gift;p.gift_number=r.gift_number;p.assigned_gift_number=null}
     render();
@@ -225,7 +247,7 @@ function openExclusions(personId,justRegistered=false){
   exclusionSearch.value='';
   const p=people.find(x=>x.id===personId);
   exclusionsTitle.textContent=justRegistered?'✅ Regalo registrado':'Editar exclusiones';
-  exclusionsGiftInfo.textContent=p?(p.name+(p.gift_number!=null?' · Regalo #'+p.gift_number:'')):'';
+  exclusionsGiftInfo.textContent=p?(p.name+(!isClassic()&&p.gift_number!=null?' · Regalo #'+p.gift_number:'')):'';
   renderExclusionOptions();
   exclusionsDialog.showModal();
 }
@@ -235,13 +257,14 @@ function renderExclusionOptions(){
   const current=editingExclusionPersonId;
   const rows=people.filter(p=>p.id!==current&&(!q||(p.name||'').toLowerCase().includes(q)));
   exclusionOptions.innerHTML=rows.map(p=>
-    '<label style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid #eee;cursor:pointer">' +
-    '<input type="checkbox" value="'+p.id+'" '+(pairExcluded(current,p.id)?'checked':'')+' style="width:auto">' +
+    '<label style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid #eee;cursor:pointer">'+
+    '<input type="checkbox" value="'+p.id+'" '+(pairExcluded(current,p.id)?'checked':'')+' style="width:auto">'+
     '<span><b>'+esc(p.name)+'</b><span class="small">'+(p.group_name?' · '+esc(p.group_name):'')+'</span></span></label>'
   ).join('')||'<div class="small">No hay personas disponibles.</div>';
 }
 
-async function saveExclusions(){if(!ensureExchangeEditable())return;
+async function saveExclusions(){
+  if(!ensureExchangeEditable())return;
   const ids=[...exclusionOptions.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value);
   try{
     await rpc('secret_santa_app_set_exclusions',{
@@ -255,90 +278,172 @@ async function saveExclusions(){if(!ensureExchangeEditable())return;
     renderDraw();
   }catch(e){alert(e.message||e)}
 }
-function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
-function calc(){
-  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
-  if(eligible.length<2)return null;
-  const nums=eligible.map(p=>p.gift_number),owner=new Map(eligible.map(p=>[p.gift_number,p]));
-  let best=null,bestScore=1e9;
-  const attempts=Math.max(12000,eligible.length*1500);
-  for(let t=0;t<attempts;t++){
-    const perm=shuffle(nums);let valid=true,score=0;
-    for(let i=0;i<eligible.length;i++){
-      if(perm[i]===eligible[i].gift_number){valid=false;break}
-      const o=owner.get(perm[i]);
-      if(o&&pairExcluded(eligible[i].id,o.id)){valid=false;break}
-      if(eligible[i].group_name&&o?.group_name&&eligible[i].group_name===o.group_name)score++;
+
+function shuffled(a){
+  const x=[...a];
+  for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}
+  return x;
+}
+
+function calcMatching(){
+  const pool=isClassic()?people:people.filter(p=>p.brought_gift&&p.gift_number!=null);
+  if(pool.length<2)return null;
+  let best=null,bestScore=Infinity;
+
+  for(let trial=0;trial<120;trial++){
+    const givers=shuffled(pool);
+    const matchRecipient=new Map();
+
+    function dfs(giver,seen){
+      let candidates=shuffled(pool.filter(r=>r.id!==giver.id&&!pairExcluded(giver.id,r.id)));
+      candidates.sort((a,b)=>{
+        const ac=(giver.group_name&&a.group_name&&giver.group_name===a.group_name)?1:0;
+        const bc=(giver.group_name&&b.group_name&&giver.group_name===b.group_name)?1:0;
+        return ac-bc;
+      });
+      for(const recipient of candidates){
+        if(seen.has(recipient.id))continue;
+        seen.add(recipient.id);
+        const previousGiverId=matchRecipient.get(recipient.id);
+        if(!previousGiverId){
+          matchRecipient.set(recipient.id,giver.id);
+          return true;
+        }
+        const previousGiver=pool.find(p=>p.id===previousGiverId);
+        if(previousGiver&&dfs(previousGiver,seen)){
+          matchRecipient.set(recipient.id,giver.id);
+          return true;
+        }
+      }
+      return false;
     }
-    if(!valid)continue;
-    if(score<bestScore){bestScore=score;best=eligible.map((p,i)=>({person:p,assigned:perm[i]}));if(score===0)break}
+
+    let valid=true;
+    for(const giver of givers){
+      if(!dfs(giver,new Set())){valid=false;break}
+    }
+    if(!valid||matchRecipient.size!==pool.length)continue;
+
+    const recipientByGiver=new Map();
+    for(const [rid,gid] of matchRecipient.entries())recipientByGiver.set(gid,rid);
+    const rows=pool.map(giver=>({person:giver,recipient:pool.find(r=>r.id===recipientByGiver.get(giver.id))}));
+    if(rows.some(x=>!x.recipient))continue;
+    const score=rows.filter(x=>x.person.group_name&&x.recipient.group_name&&x.person.group_name===x.recipient.group_name).length;
+    if(score<bestScore){best={rows,sameGroupConflicts:score};bestScore=score;if(score===0)break}
   }
-  return best?{rows:best,sameGroupConflicts:bestScore}:null;
+  return best;
 }
-function simulate(){if(!ensureExchangeEditable())return;
-  const eligibleCount=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
-  if(eligibleCount<2)return alert('Se necesitan al menos 2 regalos.');
-  const r=calc();if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
+
+function simulate(){
+  if(!ensureExchangeEditable())return;
+  const count=isClassic()?people.length:people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
+  if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 regalos.');
+  const r=calcMatching();
+  if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
   simBox.classList.remove('hidden');
-  simSummary.innerHTML=r.sameGroupConflicts===0?'<div class="ok">✅ Sin cruces de grupo/familia.</div>':`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`;
-  simResults.innerHTML=r.rows.map(x=>`<div class="item"><b>${esc(x.person.name)}</b><span class="gift">#${x.assigned}</span></div>`).join('');
+  simSummary.innerHTML=r.sameGroupConflicts===0
+    ?'<div class="ok">✅ Sin cruces de grupo/familia.</div>'
+    :`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`;
+  simResults.innerHTML=r.rows.map(x=>isClassic()
+    ?`<div class="item"><b>${esc(x.person.name)}</b><span>→ <b>${esc(x.recipient.name)}</b></span></div>`
+    :`<div class="item"><b>${esc(x.person.name)}</b><span class="gift">#${x.recipient.gift_number}</span></div>`
+  ).join('');
 }
-let pendingFinalDraw=null;
+
 function finalizeDraw(){
   if(!ensureExchangeEditable())return;
-  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
-  if(eligible.length<2)return alert('Se necesitan al menos 2 regalos.');
-  const r=calc();
+  const count=isClassic()?people.length:people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
+  if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 regalos.');
+  const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
   pendingFinalDraw=r;
+  finalDrawWarning.textContent=isClassic()
+    ?'Después no se podrán cambiar participantes, grupos, exclusiones, importe máximo ni repetir el sorteo. Cada participante tendrá asignada definitivamente la persona a la que debe regalar.'
+    :'Después no se podrán cambiar participantes, regalos, números, exclusiones, importe máximo ni repetir el sorteo.';
+  finalDrawCheckText.textContent=isClassic()
+    ?'He revisado participantes y exclusiones y quiero fijar definitivamente quién regala a quién.'
+    :'He revisado participantes, regalos y exclusiones y quiero cerrar el sorteo.';
   finalDrawSummary.innerHTML=
     '<b>Resumen antes de cerrar</b><br>'+
-    'Participantes con regalo: <b>'+eligible.length+'</b><br>'+
+    (isClassic()?'Participantes: <b>'+count+'</b><br>':'Participantes con regalo: <b>'+count+'</b><br>')+
     'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
     'Cruces de grupo/familia: <b>'+r.sameGroupConflicts+'</b>'+
-    (r.sameGroupConflicts>0?'<div class="warn" style="margin-top:10px">Atención: el mejor sorteo posible mantiene '+r.sameGroupConflicts+' cruce(s) de grupo/familia.</div>':'<div class="ok" style="margin-top:10px">El sorteo respeta todas las exclusiones y no tiene cruces de grupo/familia.</div>');
+    (r.sameGroupConflicts>0
+      ?'<div class="warn" style="margin-top:10px">Atención: el mejor sorteo posible mantiene '+r.sameGroupConflicts+' cruce(s) de grupo/familia.</div>'
+      :'<div class="ok" style="margin-top:10px">El sorteo respeta todas las exclusiones y no tiene cruces de grupo/familia.</div>');
   finalDrawCheck.checked=false;
   finalDrawDialog.showModal();
 }
+
 async function confirmFinalDraw(){
   if(!pendingFinalDraw)return finalDrawDialog.close();
   if(!finalDrawCheck.checked)return alert('Marca la casilla para confirmar que has revisado los datos.');
   try{
-    await rpc('secret_santa_app_finalize',{
-      p_exchange_id:exchangeId,
-      p_assignments:pendingFinalDraw.rows.map(x=>({person_id:x.person.id,assigned_gift_number:x.assigned})),
-      p_same_group_conflicts:pendingFinalDraw.sameGroupConflicts
-    });
+    if(isClassic()){
+      await rpc('secret_santa_app_finalize_classic',{
+        p_exchange_id:exchangeId,
+        p_assignments:pendingFinalDraw.rows.map(x=>({person_id:x.person.id,assigned_person_id:x.recipient.id})),
+        p_same_group_conflicts:pendingFinalDraw.sameGroupConflicts
+      });
+    }else{
+      await rpc('secret_santa_app_finalize',{
+        p_exchange_id:exchangeId,
+        p_assignments:pendingFinalDraw.rows.map(x=>({person_id:x.person.id,assigned_gift_number:x.recipient.gift_number})),
+        p_same_group_conflicts:pendingFinalDraw.sameGroupConflicts
+      });
+    }
     pendingFinalDraw=null;
     finalDrawDialog.close();
     await load();
     simBox.classList.add('hidden');
   }catch(e){alert(e.message||e)}
 }
-async function resetDraw(){if(!ensureExchangeEditable())return;
-  if(!confirm('¿Reiniciar sorteo? Se conservarán los números físicos de los regalos.'))return;
-  try{await rpc('secret_santa_app_reset',{p_exchange_id:exchangeId});await load();hideResult()}catch(e){alert(e.message||e)}
-}
+
 function renderDraw(){
-  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
-  drawInfo.textContent=`Participan ${eligible.length} personas con regalo · ${exclusions.length} exclusión(es) configurada(s).`;
+  const classic=isClassic();
+  const eligible=classic?people:people.filter(p=>p.brought_gift&&p.gift_number!=null);
+  drawInfo.textContent=classic
+    ?`Participan ${eligible.length} personas · ${exclusions.length} exclusión(es) configurada(s). Cada persona recibirá exactamente un destinatario.`
+    :`Participan ${eligible.length} personas con regalo · ${exclusions.length} exclusión(es) configurada(s).`;
   simulateBtn.disabled=exchange.draw_finalized;
   finalBtn.classList.toggle('hidden',exchange.draw_finalized);
-  resetBtn.classList.add('hidden');
   resultsCard.classList.toggle('hidden',!exchange.draw_finalized);
+
   if(exchange.draw_finalized){
     finalStatus.classList.remove('hidden');
     finalStatus.className=Number(exchange.same_group_conflicts||0)===0?'ok':'warn';
-    finalStatus.textContent=Number(exchange.same_group_conflicts||0)===0?'✅ Sorteo definitivo realizado.':`⚠️ Sorteo definitivo con ${exchange.same_group_conflicts} cruce(s) de grupo/familia.`;
+    finalStatus.textContent=Number(exchange.same_group_conflicts||0)===0
+      ?'✅ Sorteo definitivo realizado. Este Amigo invisible está cerrado.'
+      :`⚠️ Sorteo definitivo con ${exchange.same_group_conflicts} cruce(s) de grupo/familia. Este Amigo invisible está cerrado.`;
     personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  }else finalStatus.classList.add('hidden');
+    resultHelp.textContent=classic
+      ?'Selecciona una persona para mostrar únicamente a quién tiene que regalar.'
+      :'Selecciona una persona para mostrar únicamente el número de regalo que le corresponde.';
+  }else{
+    finalStatus.classList.add('hidden');
+  }
 }
+
 function showResult(){
   const p=people.find(x=>x.id===personResult.value);
-  if(!p?.assigned_gift_number)return alert('Selecciona una persona.');
-  revealedName.textContent=p.name;revealedNumber.textContent='#'+p.assigned_gift_number;revealed.classList.remove('hidden');
+  if(!p)return alert('Selecciona una persona.');
+  revealedName.textContent=p.name;
+  if(isClassic()){
+    const recipient=people.find(x=>x.id===p.assigned_person_id);
+    if(!recipient)return alert('No hay destinatario asignado.');
+    revealedLabel.textContent='Tienes que regalar a';
+    revealedNumber.style.fontSize='42px';
+    revealedNumber.textContent=recipient.name;
+  }else{
+    if(!p.assigned_gift_number)return alert('No hay número asignado.');
+    revealedLabel.textContent='Tu regalo es el número';
+    revealedNumber.style.fontSize='';
+    revealedNumber.textContent='#'+p.assigned_gift_number;
+  }
+  revealed.classList.remove('hidden');
 }
 function hideResult(){revealed.classList.add('hidden');revealedName.textContent='';revealedNumber.textContent='';personResult.value=''}
+
 load();
 </script>
 </body>
