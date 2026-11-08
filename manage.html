@@ -71,6 +71,25 @@
   </div>
 </dialog>
 
+<dialog id="finalDrawDialog">
+  <div class="card" style="margin:0;max-width:620px">
+    <div class="warn" style="padding:14px;border-radius:14px">
+      <h2 style="margin-top:0">⚠️ Sorteo definitivo</h2>
+      <div><b>Esta acción cierra el Amigo invisible.</b></div>
+      <div class="small" style="margin-top:6px">Después no se podrán cambiar participantes, regalos, números, exclusiones ni el importe máximo, ni repetir el sorteo.</div>
+    </div>
+    <div id="finalDrawSummary" class="sim" style="margin-top:12px"></div>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px">
+      <input id="finalDrawCheck" type="checkbox" style="width:auto;margin-top:3px">
+      <span>He revisado los participantes, regalos y exclusiones y quiero cerrar el sorteo.</span>
+    </label>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="finalDrawDialog.close()">Cancelar</button>
+      <button class="btn danger" onclick="confirmFinalDraw()">Realizar sorteo definitivo</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="exclusionsDialog">
   <div class="card" style="margin:0;min-width:min(520px,90vw)">
     <div class="top">
@@ -108,7 +127,7 @@ function ensureExchangeEditable(){
     return false;
   }
   return true;
-}return true}
+}
 async function rpc(name,args={}){const {data,error}=await sb.rpc(name,args);if(error)throw error;return data}
 
 async function load(){
@@ -264,17 +283,34 @@ function simulate(){if(!ensureExchangeEditable())return;
   simSummary.innerHTML=r.sameGroupConflicts===0?'<div class="ok">✅ Sin cruces de grupo/familia.</div>':`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`;
   simResults.innerHTML=r.rows.map(x=>`<div class="item"><b>${esc(x.person.name)}</b><span class="gift">#${x.assigned}</span></div>`).join('');
 }
-async function finalizeDraw(){if(!ensureExchangeEditable())return;
-  const eligibleCount=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
-  if(eligibleCount<2)return alert('Se necesitan al menos 2 regalos.');
-  const r=calc();if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
-  if(!confirm('¿Guardar como sorteo DEFINITIVO?'))return;
+let pendingFinalDraw=null;
+function finalizeDraw(){
+  if(!ensureExchangeEditable())return;
+  const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
+  if(eligible.length<2)return alert('Se necesitan al menos 2 regalos.');
+  const r=calc();
+  if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
+  pendingFinalDraw=r;
+  finalDrawSummary.innerHTML=
+    '<b>Resumen antes de cerrar</b><br>'+
+    'Participantes con regalo: <b>'+eligible.length+'</b><br>'+
+    'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
+    'Cruces de grupo/familia: <b>'+r.sameGroupConflicts+'</b>'+
+    (r.sameGroupConflicts>0?'<div class="warn" style="margin-top:10px">Atención: el mejor sorteo posible mantiene '+r.sameGroupConflicts+' cruce(s) de grupo/familia.</div>':'<div class="ok" style="margin-top:10px">El sorteo respeta todas las exclusiones y no tiene cruces de grupo/familia.</div>');
+  finalDrawCheck.checked=false;
+  finalDrawDialog.showModal();
+}
+async function confirmFinalDraw(){
+  if(!pendingFinalDraw)return finalDrawDialog.close();
+  if(!finalDrawCheck.checked)return alert('Marca la casilla para confirmar que has revisado los datos.');
   try{
     await rpc('secret_santa_app_finalize',{
       p_exchange_id:exchangeId,
-      p_assignments:r.rows.map(x=>({person_id:x.person.id,assigned_gift_number:x.assigned})),
-      p_same_group_conflicts:r.sameGroupConflicts
+      p_assignments:pendingFinalDraw.rows.map(x=>({person_id:x.person.id,assigned_gift_number:x.assigned})),
+      p_same_group_conflicts:pendingFinalDraw.sameGroupConflicts
     });
+    pendingFinalDraw=null;
+    finalDrawDialog.close();
     await load();
     simBox.classList.add('hidden');
   }catch(e){alert(e.message||e)}
