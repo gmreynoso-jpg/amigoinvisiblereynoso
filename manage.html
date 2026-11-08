@@ -33,23 +33,6 @@
     <h2>Sorteo</h2>
     <div id="drawInfo" class="small"></div>
     <button id="simulateBtn" class="btn light full" style="margin-top:12px" onclick="simulate()">🧪 Simular sorteo</button>
-    <div id="simBox" class="sim hidden" style="margin-top:12px">
-      <div class="top"><b>Simulación</b><button class="btn light" onclick="simBox.classList.add('hidden')">Cerrar</button></div>
-      <div class="small">No guarda nada. Imita cómo se verá la entrega después del sorteo.</div>
-      <div id="simSummary" style="margin-top:8px"></div>
-      <div class="top" style="margin-top:12px">
-        <b>Simulación de entrega</b>
-        <div id="simDeliveryStats" class="small"></div>
-      </div>
-      <div id="simPauseState" class="small" style="margin-top:8px"></div>
-      <div class="grid2" style="margin-top:8px">
-        <button id="simPauseBtn" class="btn light" onclick="toggleSimPause()">⏸ Pausar</button>
-        <button class="btn light" onclick="simDeliveryScope='all';renderSimDelivery()">Ver listado</button>
-      </div>
-      <div id="simCurrentBox" class="sectionNote" style="margin-top:10px;text-align:center"></div>
-      <div id="simResults" style="margin-top:8px"></div>
-      <div class="small" style="margin-top:10px">Todo lo que marques aquí es ficticio y se borra al cerrar o repetir la simulación.</div>
-    </div>
     <button id="finalBtn" class="btn primary full" style="margin-top:12px" onclick="finalizeDraw()">🎲 Realizar sorteo</button>
     <div id="finalStatus" class="hidden" style="margin-top:12px"></div>
   </div>
@@ -143,20 +126,7 @@
   </div>
 </dialog>
 
-<dialog id="simDeliveryDialog">
-  <div class="card" style="margin:0;min-width:min(520px,90vw);text-align:center">
-    <div class="small">Turno de</div>
-    <h2 id="simDeliveryName" style="font-size:30px"></h2>
-    <button id="simRevealBtn" class="btn primary full" onclick="simRevealGift()">Mostrar regalo</button>
-    <div id="simGiftArea" class="hidden" style="margin-top:18px">
-      <div class="small">Debe recoger</div>
-      <div id="simGiftValue" class="result"></div>
-      <div id="simGiftNote" class="small"></div>
-      <button class="btn primary full" style="margin-top:16px" onclick="simMarkDelivered()">✓ Marcar como entregado</button>
-    </div>
-    <button class="btn light full" style="margin-top:10px" onclick="simDeliveryDialog.close()">Cerrar sin entregar</button>
-  </div>
-</dialog>
+
 
 <dialog id="exclusionsDialog">
   <div class="card" style="margin:0;min-width:min(520px,90vw)">
@@ -185,7 +155,7 @@ const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
 const exchangeId=new URLSearchParams(location.search).get('id');
 let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null,pendingFinalDraw=null;
-let simDeliveryRows=[],simDeliveryCurrent=null,simDeliveryScope='pending',simPaused=false,simPreparedResult=null;
+let simPreparedResult=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
@@ -296,7 +266,6 @@ async function removePerson(id){
   if(!confirm('¿Marcar a '+p.name+' como NO participante de este Amigo invisible?'+giftText+redrawText+meetingText))return;
   try{
     await rpc('secret_santa_app_remove_person',{p_exchange_id:exchangeId,p_person_id:id});
-    simBox.classList.add('hidden');
     await load();
   }catch(e){alert(e.message||e)}
 }
@@ -448,93 +417,20 @@ function simulate(){
 function startSimDelivery(){
   const r=simPreparedResult;
   if(!r)return;
+  const payload={
+    exchangeId,
+    name:exchange?.name||'Simulación',
+    eventDate:exchange?.event_date||null,
+    drawMode:exchange?.draw_mode||'gift_numbers',
+    rows:(isClassic()
+      ?r.rows.map(x=>({person_id:x.recipient.id,person_name:x.recipient.name,gift_number:x.person.gift_number??null,has_gift:!!(x.person.brought_gift&&x.person.gift_number!=null)}))
+      :r.rows.map(x=>({person_id:x.person.id,person_name:x.person.name,gift_number:x.recipient.gift_number??null,has_gift:true}))
+    )
+  };
+  sessionStorage.setItem('secretSantaSimulation:'+exchangeId,JSON.stringify(payload));
   simDoneDialog.close();
-  simBox.classList.remove('hidden');
-  simPaused=false;
-  simDeliveryScope='pending';
-
-  if(isClassic()){
-    simDeliveryRows=r.rows.map(x=>({receiver:x.recipient,giftOwner:x.person,delivered:false}));
-  }else{
-    simDeliveryRows=r.rows.map(x=>({receiver:x.person,giftOwner:x.recipient,delivered:false}));
-  }
-  simDeliveryRows=shuffled(simDeliveryRows).map((x,i)=>({...x,order:i+1}));
-  simDeliveryCurrent=null;
-  renderSimDelivery();
+  location.href='delivery.html?id='+encodeURIComponent(exchangeId)+'&simulation=1';
 }
-function renderSimDelivery(){
-  const delivered=simDeliveryRows.filter(x=>x.delivered).length;
-  const pending=simDeliveryRows.length-delivered;
-  simDeliveryStats.textContent=`${delivered} entregado(s) de ${simDeliveryRows.length} · ${pending} pendiente(s)`;
-  simPauseState.textContent=simPaused?'⏸ Entrega simulada pausada.':'▶ Entrega simulada en curso.';
-  simPauseBtn.textContent=simPaused?'▶ Reanudar':'⏸ Pausar';
-
-  const ordered=simDeliveryRows.filter(x=>!x.delivered).sort((a,b)=>a.order-b.order);
-  simDeliveryCurrent=ordered[0]||null;
-  if(simDeliveryCurrent&&!simPaused){
-    simCurrentBox.innerHTML='<div class="small">Siguiente participante</div><h3 style="margin:6px 0">'+esc(simDeliveryCurrent.receiver.name)+'</h3>'+
-      '<div class="grid2"><button class="btn light" onclick="simSkipCurrent()">Saltar por ahora</button><button class="btn primary" onclick="openSimDelivery(\''+simDeliveryCurrent.receiver.id+'\')">Llamar / mostrar</button></div>';
-  }else if(simPaused){
-    simCurrentBox.innerHTML='<b>Simulación pausada</b><div class="small">Puedes revisar el listado y reanudar cuando quieras.</div>';
-  }else{
-    simCurrentBox.innerHTML='<div class="ok">✅ Todos los participantes de la simulación constan como entregados.</div>';
-  }
-
-  const rows=simDeliveryScope==='all'?simDeliveryRows:ordered;
-  simResults.innerHTML=rows.sort((a,b)=>a.order-b.order).map(x=>{
-    const number=x.giftOwner?.gift_number;
-    return `<div class="item">
-      <div><b>${esc(x.receiver.name)}</b><div class="small">${x.delivered?'✅ Entregado en la simulación':'⏳ Pendiente'}${number!=null?' · Regalo #'+number:' · Regalo físico pendiente'}</div></div>
-      <div>${x.delivered?'<button class="btn light" onclick="simSetPending(\''+x.receiver.id+'\')">Volver a pendiente</button>':''}</div>
-    </div>`;
-  }).join('')||'<div class="small">No quedan participantes pendientes.</div>';
-}
-
-function toggleSimPause(){simPaused=!simPaused;renderSimDelivery()}
-function simSkipCurrent(){
-  if(!simDeliveryCurrent)return;
-  const max=Math.max(0,...simDeliveryRows.map(x=>x.order||0));
-  simDeliveryCurrent.order=max+1;
-  renderSimDelivery();
-}
-function openSimDelivery(personId){
-  simDeliveryCurrent=simDeliveryRows.find(x=>x.receiver.id===personId)||null;
-  if(!simDeliveryCurrent)return;
-  simDeliveryName.textContent=simDeliveryCurrent.receiver.name;
-  simGiftArea.classList.add('hidden');
-  simRevealBtn.classList.remove('hidden');
-  simGiftValue.textContent='';
-  simGiftNote.textContent='';
-  simDeliveryDialog.showModal();
-}
-
-function simRevealGift(){
-  if(!simDeliveryCurrent)return;
-  simRevealBtn.classList.add('hidden');
-  simGiftArea.classList.remove('hidden');
-  const number=simDeliveryCurrent.giftOwner?.gift_number;
-  if(number!=null){
-    simGiftValue.textContent='#'+number;
-    simGiftNote.textContent='';
-  }else{
-    simGiftValue.textContent='Pendiente';
-    simGiftNote.textContent='Este regalo todavía no tiene número físico. En la entrega real podrá registrarse cuando llegue.';
-  }
-}
-
-function simMarkDelivered(){
-  if(!simDeliveryCurrent)return;
-  simDeliveryCurrent.delivered=true;
-  simDeliveryDialog.close();
-  simDeliveryCurrent=null;
-  renderSimDelivery();
-}
-
-function simSetPending(personId){
-  const row=simDeliveryRows.find(x=>x.receiver.id===personId);
-  if(row){row.delivered=false;renderSimDelivery()}
-}
-
 function finalizeDraw(){
   if(!ensureExchangeEditable())return;
   const pool=drawPool();
@@ -576,7 +472,6 @@ async function confirmFinalDraw(){
     pendingFinalDraw=null;
     finalDrawDialog.close();
     await load();
-    simBox.classList.add('hidden');
     const eligible=drawPool();
     drawDoneSummary.innerHTML=
       'Participantes incluidos: <b>'+eligible.length+'</b><br>'+
