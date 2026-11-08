@@ -315,8 +315,11 @@ async function setGift(id,brought){
   if(!brought&&!ensureExchangeEditable())return;
   if(brought&&deliveryLocked()&&!isClassic())return alert('La entrega ya ha comenzado. En Sorteo de regalos no se pueden incorporar nuevos participantes después de la primera entrega.');
   try{
-    await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
+    const result=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:id,p_brought:brought});
     await load();
+    if(brought&&result?.attendance_auto_confirmed){
+      alert('✅ Regalo recepcionado.\n\nComo este Amigo invisible está vinculado a un evento, la asistencia de '+(result.participant_name||'esta persona')+' se ha confirmado automáticamente.');
+    }
     if(brought&&!deliveryLocked())openExclusions(id,true);
   }catch(e){alert(e.message||e)}
 }
