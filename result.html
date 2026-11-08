@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tu Amigo invisible</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app" style="max-width:680px">
+  <div class="card" style="text-align:center">
+    <h1>🎁 Tu Amigo invisible</h1>
+    <div id="status" class="small">Consultando resultado...</div>
+    <div id="resultArea" class="hidden" style="margin-top:18px">
+      <div id="exchangeName" class="small"></div>
+      <h2 id="personName" style="margin-top:12px"></h2>
+      <div id="resultLabel" class="small" style="margin-top:14px"></div>
+      <div id="resultValue" class="result"></div>
+      <div id="amountInfo" class="small"></div>
+      <div class="warn" style="margin-top:18px;text-align:left">
+        Este enlace es personal. No lo compartas con otros participantes si quieres mantener el secreto del sorteo.
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+const token=new URLSearchParams(location.search).get('token');
+function euro(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
+function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
+async function load(){
+  if(!token){status.textContent='Enlace personal no válido.';return}
+  const {data,error}=await sb.rpc('secret_santa_app_personal_result',{p_token:token});
+  if(error){status.textContent=error.message||'No se pudo consultar el resultado.';return}
+  status.classList.add('hidden');
+  resultArea.classList.remove('hidden');
+  exchangeName.textContent=(data.exchange_name||'Amigo invisible')+(data.event_date?' · '+fmtDate(data.event_date):'');
+  personName.textContent=data.person_name||'';
+  if(data.draw_mode==='classic'){
+    resultLabel.textContent='Tienes que regalar a';
+    resultValue.style.fontSize='42px';
+    resultValue.textContent=data.recipient_name||'—';
+  }else{
+    resultLabel.textContent='Tu regalo es el número';
+    resultValue.textContent=data.assigned_gift_number?'#'+data.assigned_gift_number:'—';
+  }
+  amountInfo.textContent=Number(data.max_amount||0)>0?'Importe máximo orientativo: '+euro(data.max_amount):'';
+}
+load();
+</script>
+</body>
+</html>
