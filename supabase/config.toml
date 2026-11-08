@@ -1,0 +1,2 @@
+[functions.send-secret-santa-notifications]
+verify_jwt = false
