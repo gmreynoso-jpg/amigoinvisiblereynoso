@@ -71,11 +71,33 @@
   </div>
 </dialog>
 
+<dialog id="exclusionsDialog">
+  <div class="card" style="margin:0;min-width:min(520px,90vw)">
+    <div class="top">
+      <div>
+        <h2 id="exclusionsTitle">Regalo registrado</h2>
+        <div id="exclusionsGiftInfo" class="small"></div>
+      </div>
+      <button class="btn light" onclick="exclusionsDialog.close()">Cerrar</button>
+    </div>
+    <div style="margin-top:14px">
+      <b>No emparejar con</b>
+      <div class="small">Opcional. Estas exclusiones son bidireccionales y solo afectan a este Amigo invisible.</div>
+      <input id="exclusionSearch" placeholder="Buscar persona..." oninput="renderExclusionOptions()" style="margin-top:10px">
+      <div id="exclusionOptions" style="max-height:320px;overflow:auto;margin-top:8px"></div>
+    </div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="exclusionsDialog.close()">Cerrar</button>
+      <button class="btn primary" onclick="saveExclusions()">Guardar exclusiones</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
 const exchangeId=new URLSearchParams(location.search).get('id');
-let exchange=null,meeting=null,people=[],groups=[];
+let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
@@ -86,7 +108,7 @@ async function load(){
   if(!exchangeId){location.href='index.html';return}
   try{
     const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
-    exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];
+    exchange=d.exchange;meeting=d.meeting;people=d.people||[];groups=d.groups||[];exclusions=d.exclusions||[];
     render();
   }catch(e){alert(e.message||e)}
 }
@@ -108,8 +130,8 @@ function renderPeople(){
       <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'}</div></div>
       <div>
         ${p.brought_gift
-          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
-          : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
+          ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="openExclusions('${p.id}',false)">Exclusiones</button> <button class="btn light" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',false)">Quitar</button>`
+          : `<button class="btn primary" ${exchange.draw_finalized?'disabled':''} onclick="setGift('${p.id}',true)">Trae regalo</button>`}
       </div>
     </div>`).join('');
 }
@@ -156,6 +178,51 @@ async function setGift(id,brought){
     const p=people.find(x=>x.id===id);
     if(p){p.brought_gift=r.brought_gift;p.gift_number=r.gift_number;p.assigned_gift_number=null}
     render();
+    if(brought)openExclusions(id,true);
+  }catch(e){alert(e.message||e)}
+}
+
+function pairExcluded(a,b){
+  return exclusions.some(e=>
+    (e.person_a_id===a&&e.person_b_id===b)||
+    (e.person_a_id===b&&e.person_b_id===a)
+  );
+}
+
+function openExclusions(personId,justRegistered=false){
+  if(exchange.draw_finalized)return;
+  editingExclusionPersonId=personId;
+  exclusionSearch.value='';
+  const p=people.find(x=>x.id===personId);
+  exclusionsTitle.textContent=justRegistered?'✅ Regalo registrado':'Editar exclusiones';
+  exclusionsGiftInfo.textContent=p?(p.name+(p.gift_number!=null?' · Regalo #'+p.gift_number:'')):'';
+  renderExclusionOptions();
+  exclusionsDialog.showModal();
+}
+
+function renderExclusionOptions(){
+  const q=(exclusionSearch.value||'').trim().toLowerCase();
+  const current=editingExclusionPersonId;
+  const rows=people.filter(p=>p.id!==current&&(!q||(p.name||'').toLowerCase().includes(q)));
+  exclusionOptions.innerHTML=rows.map(p=>
+    '<label style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid #eee;cursor:pointer">' +
+    '<input type="checkbox" value="'+p.id+'" '+(pairExcluded(current,p.id)?'checked':'')+' style="width:auto">' +
+    '<span><b>'+esc(p.name)+'</b><span class="small">'+(p.group_name?' · '+esc(p.group_name):'')+'</span></span></label>'
+  ).join('')||'<div class="small">No hay personas disponibles.</div>';
+}
+
+async function saveExclusions(){
+  const ids=[...exclusionOptions.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value);
+  try{
+    await rpc('secret_santa_app_set_exclusions',{
+      p_exchange_id:exchangeId,
+      p_person_id:editingExclusionPersonId,
+      p_excluded_person_ids:ids
+    });
+    const d=await rpc('secret_santa_app_get',{p_exchange_id:exchangeId});
+    exclusions=d.exclusions||[];
+    exclusionsDialog.close();
+    renderDraw();
   }catch(e){alert(e.message||e)}
 }
 function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
@@ -170,6 +237,7 @@ function calc(){
     for(let i=0;i<eligible.length;i++){
       if(perm[i]===eligible[i].gift_number){valid=false;break}
       const o=owner.get(perm[i]);
+      if(o&&pairExcluded(eligible[i].id,o.id)){valid=false;break}
       if(eligible[i].group_name&&o?.group_name&&eligible[i].group_name===o.group_name)score++;
     }
     if(!valid)continue;
@@ -202,7 +270,7 @@ async function resetDraw(){
 }
 function renderDraw(){
   const eligible=people.filter(p=>p.brought_gift&&p.gift_number!=null);
-  drawInfo.textContent=`Participan ${eligible.length} personas con regalo.`;
+  drawInfo.textContent=`Participan ${eligible.length} personas con regalo · ${exclusions.length} exclusión(es) configurada(s).`;
   simulateBtn.disabled=exchange.draw_finalized;
   finalBtn.classList.toggle('hidden',exchange.draw_finalized);
   resetBtn.classList.toggle('hidden',!exchange.draw_finalized);
