@@ -32,6 +32,11 @@
     </div>
   </div>
 
+  <div id="missingGiftsCard" class="card hidden">
+    <div class="top"><div><h2>Regalos pendientes de recepción</h2><div class="small">Puedes registrar aquí regalos que lleguen después de haber iniciado la entrega.</div></div></div>
+    <div id="missingGiftsList"></div>
+  </div>
+
   <div class="card">
     <div class="top">
       <div><h2>Estado de entregas</h2><div id="stats" class="small"></div></div>
@@ -106,7 +111,7 @@ const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
 const exchangeId=new URLSearchParams(location.search).get('id');
 const autoStart=new URLSearchParams(location.search).get('start')==='1';
-let data=null,rows=[],current=null;
+let data=null,rows=[],current=null,missingGifts=[];
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
@@ -118,6 +123,7 @@ async function load(first=false){
   try{
     data=await rpc('secret_santa_app_delivery',{p_exchange_id:exchangeId});
     rows=data.people||[];
+    missingGifts=data.missing_gifts||[];
     backBtn.href='index.html';
     editBeforeDeliveryBtn.href='manage.html?id='+encodeURIComponent(exchangeId)+'&edit=1';
     subtitle.textContent=(data.exchange?.name||'Amigo invisible')+(data.exchange?.event_date?' · '+fmtDate(data.exchange.event_date):'');
@@ -151,6 +157,7 @@ function render(){
   const delivered=rows.filter(x=>!!x.delivered_at).length;
   const pending=rows.length-delivered;
   stats.textContent=`${delivered} entregado(s) de ${rows.length} · ${pending} pendiente(s)`;
+  renderMissingGifts();
 
   editBeforeDeliveryBtn.classList.toggle('hidden',!!ex.delivery_locked||!!ex.delivery_closed_at);
 
@@ -188,6 +195,31 @@ function renderCurrent(){
   currentStatus.textContent=next.has_gift?'Regalo preparado':'Regalo físico pendiente';
   currentCard.classList.remove('hidden');
 }
+function renderMissingGifts(){
+  const ex=data?.exchange||{};
+  const show=(ex.draw_mode==='classic'||ex.draw_mode==='blind')&&missingGifts.length>0&&!ex.delivery_closed_at;
+  missingGiftsCard.classList.toggle('hidden',!show);
+  if(!show){missingGiftsList.innerHTML='';return}
+  missingGiftsList.innerHTML=missingGifts.map(x=>`
+    <div class="item">
+      <div><b>${esc(x.person_name)}</b><div class="small">Regalo físico todavía no recepcionado</div></div>
+      <button class="btn primary" onclick="registerPendingGift('${x.person_id}','${esc(x.person_name)}')">Registrar regalo</button>
+    </div>`).join('');
+}
+
+async function registerPendingGift(personId,name){
+  if(!confirm('¿Registrar ahora el regalo físico de '+name+'?'))return;
+  try{
+    const result=await rpc('secret_santa_app_set_gift',{p_exchange_id:exchangeId,p_person_id:personId,p_brought:true});
+    await load();
+    if(result?.event_participant_created){
+      alert('✅ Regalo recepcionado. '+(result.participant_name||name)+' se ha añadido automáticamente al historial del evento y consta como asistente.');
+    }else if(result?.attendance_auto_confirmed){
+      alert('✅ Regalo recepcionado. La asistencia de '+(result.participant_name||name)+' al evento se ha confirmado automáticamente.');
+    }
+  }catch(e){alert(e.message||e)}
+}
+
 function renderList(){
   if(!data)return;
   const q=(search.value||'').trim().toLowerCase(),s=scope.value;
