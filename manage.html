@@ -41,10 +41,12 @@
         <b>Simulación de entrega</b>
         <div id="simDeliveryStats" class="small"></div>
       </div>
+      <div id="simPauseState" class="small" style="margin-top:8px"></div>
       <div class="grid2" style="margin-top:8px">
-        <button class="btn light" onclick="simDeliveryScope='pending';renderSimDelivery()">Pendientes</button>
-        <button class="btn light" onclick="simDeliveryScope='all';renderSimDelivery()">Todos</button>
+        <button id="simPauseBtn" class="btn light" onclick="toggleSimPause()">⏸ Pausar</button>
+        <button class="btn light" onclick="simDeliveryScope='all';renderSimDelivery()">Ver listado</button>
       </div>
+      <div id="simCurrentBox" class="sectionNote" style="margin-top:10px;text-align:center"></div>
       <div id="simResults" style="margin-top:8px"></div>
       <div class="small" style="margin-top:10px">Todo lo que marques aquí es ficticio y se borra al cerrar o repetir la simulación.</div>
     </div>
@@ -113,6 +115,34 @@
   </div>
 </dialog>
 
+<dialog id="drawDoneDialog">
+  <div class="card" style="margin:0;max-width:620px">
+    <div class="ok" style="padding:14px;border-radius:14px">
+      <h2 style="margin-top:0">✅ Sorteo realizado</h2>
+      <div id="drawDoneSummary" class="small"></div>
+    </div>
+    <div class="small" style="margin-top:12px">Puedes empezar ahora la entrega. La aplicación preparará un orden aleatorio de los participantes incluidos y mostrará uno cada vez.</div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="drawDoneDialog.close()">Ahora no</button>
+      <button class="btn primary" onclick="startRealDelivery()">Comenzar entrega</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="simDoneDialog">
+  <div class="card" style="margin:0;max-width:620px">
+    <div class="ok" style="padding:14px;border-radius:14px">
+      <h2 style="margin-top:0">🧪 Simulación realizada</h2>
+      <div id="simDoneSummary" class="small"></div>
+    </div>
+    <div class="small" style="margin-top:12px">La siguiente fase simula la entrega completa: orden aleatorio, revelar regalo, entregar, saltar y pausar. Nada se guarda.</div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn light" onclick="simDoneDialog.close()">Cerrar</button>
+      <button class="btn primary" onclick="startSimDelivery()">Comenzar entrega simulada</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="simDeliveryDialog">
   <div class="card" style="margin:0;min-width:min(520px,90vw);text-align:center">
     <div class="small">Turno de</div>
@@ -155,7 +185,7 @@ const cfg=window.APP_CONFIG||{};
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
 const exchangeId=new URLSearchParams(location.search).get('id');
 let exchange=null,meeting=null,people=[],groups=[],exclusions=[],editingExclusionPersonId=null,pendingFinalDraw=null;
-let simDeliveryRows=[],simDeliveryCurrent=null,simDeliveryScope='pending';
+let simDeliveryRows=[],simDeliveryCurrent=null,simDeliveryScope='pending',simPaused=false,simPreparedResult=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(v){if(!v)return '';return new Date(v+'T12:00:00').toLocaleDateString('es-ES')}
@@ -401,60 +431,72 @@ function simulate(){
   const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
 
-  simBox.classList.remove('hidden');
-
   const missing=isClassic()?people.filter(p=>!p.brought_gift||p.gift_number==null).length:0;
   const excludedNoGift=isClassic()?0:people.length-count;
-  simSummary.innerHTML=
-    (r.sameGroupConflicts===0
-      ?'<div class="ok">✅ Sin cruces de grupo/familia.</div>'
-      :`<div class="warn">⚠️ ${r.sameGroupConflicts} cruce(s) de grupo/familia.</div>`)+
-    '<div class="small" style="margin-top:8px"><b>Vista previa completa.</b> La asignación y la entrega simulada no guardan nada. '+
+
+  simPreparedResult=r;
+  simDoneSummary.innerHTML=
+    'Participantes incluidos: <b>'+count+'</b><br>'+
+    'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
+    'Cruces de grupo/familia: <b>'+r.sameGroupConflicts+'</b><br>'+
     (isClassic()
-      ?(missing?missing+' regalo(s) todavía no tienen número físico y aparecerán como pendientes.':'Todos los regalos están registrados.')
-      :count+' participante(s) entran en el sorteo por haber entregado regalo'+(excludedNoGift?' y '+excludedNoGift+' quedan fuera por no haberlo entregado.':'.'))+
-    '</div>';
+      ?'Regalos físicos pendientes: <b>'+missing+'</b>'
+      :'Fuera del sorteo por no traer regalo: <b>'+excludedNoGift+'</b>');
+  simDoneDialog.showModal();
+}
+
+function startSimDelivery(){
+  const r=simPreparedResult;
+  if(!r)return;
+  simDoneDialog.close();
+  simBox.classList.remove('hidden');
+  simPaused=false;
+  simDeliveryScope='pending';
 
   if(isClassic()){
-    simDeliveryRows=r.rows.map(x=>({
-      receiver:x.recipient,
-      giftOwner:x.person,
-      delivered:false
-    }));
+    simDeliveryRows=r.rows.map(x=>({receiver:x.recipient,giftOwner:x.person,delivered:false}));
   }else{
-    simDeliveryRows=r.rows.map(x=>({
-      receiver:x.person,
-      giftOwner:x.recipient,
-      delivered:false
-    }));
+    simDeliveryRows=r.rows.map(x=>({receiver:x.person,giftOwner:x.recipient,delivered:false}));
   }
-
-  simDeliveryRows.sort((a,b)=>(a.receiver.name||'').localeCompare(b.receiver.name||'','es'));
-  simDeliveryScope='pending';
+  simDeliveryRows=shuffled(simDeliveryRows).map((x,i)=>({...x,order:i+1}));
   simDeliveryCurrent=null;
   renderSimDelivery();
 }
-
 function renderSimDelivery(){
   const delivered=simDeliveryRows.filter(x=>x.delivered).length;
-  simDeliveryStats.textContent=`${delivered} entregado(s) de ${simDeliveryRows.length} · ${simDeliveryRows.length-delivered} pendiente(s)`;
-  const rows=simDeliveryRows.filter(x=>simDeliveryScope==='all'||!x.delivered);
-  simResults.innerHTML=rows.map(x=>{
+  const pending=simDeliveryRows.length-delivered;
+  simDeliveryStats.textContent=`${delivered} entregado(s) de ${simDeliveryRows.length} · ${pending} pendiente(s)`;
+  simPauseState.textContent=simPaused?'⏸ Entrega simulada pausada.':'▶ Entrega simulada en curso.';
+  simPauseBtn.textContent=simPaused?'▶ Reanudar':'⏸ Pausar';
+
+  const ordered=simDeliveryRows.filter(x=>!x.delivered).sort((a,b)=>a.order-b.order);
+  simDeliveryCurrent=ordered[0]||null;
+  if(simDeliveryCurrent&&!simPaused){
+    simCurrentBox.innerHTML='<div class="small">Siguiente participante</div><h3 style="margin:6px 0">'+esc(simDeliveryCurrent.receiver.name)+'</h3>'+
+      '<div class="grid2"><button class="btn light" onclick="simSkipCurrent()">Saltar por ahora</button><button class="btn primary" onclick="openSimDelivery(\''+simDeliveryCurrent.receiver.id+'\')">Llamar / mostrar</button></div>';
+  }else if(simPaused){
+    simCurrentBox.innerHTML='<b>Simulación pausada</b><div class="small">Puedes revisar el listado y reanudar cuando quieras.</div>';
+  }else{
+    simCurrentBox.innerHTML='<div class="ok">✅ Todos los participantes de la simulación constan como entregados.</div>';
+  }
+
+  const rows=simDeliveryScope==='all'?simDeliveryRows:ordered;
+  simResults.innerHTML=rows.sort((a,b)=>a.order-b.order).map(x=>{
     const number=x.giftOwner?.gift_number;
     return `<div class="item">
-      <div>
-        <b>${esc(x.receiver.name)}</b>
-        <div class="small">${x.delivered?'✅ Entregado en la simulación':'⏳ Pendiente en la simulación'}${number!=null?' · Regalo #'+number:' · Regalo físico pendiente'}</div>
-      </div>
-      <div>
-        ${x.delivered
-          ?'<button class="btn light" onclick="simSetPending(\''+x.receiver.id+'\')">Volver a pendiente</button>'
-          :'<button class="btn primary" onclick="openSimDelivery(\''+x.receiver.id+'\')">Llamar / mostrar</button>'}
-      </div>
+      <div><b>${esc(x.receiver.name)}</b><div class="small">${x.delivered?'✅ Entregado en la simulación':'⏳ Pendiente'}${number!=null?' · Regalo #'+number:' · Regalo físico pendiente'}</div></div>
+      <div>${x.delivered?'<button class="btn light" onclick="simSetPending(\''+x.receiver.id+'\')">Volver a pendiente</button>':''}</div>
     </div>`;
-  }).join('')||'<div class="small">No quedan participantes pendientes en la simulación.</div>';
+  }).join('')||'<div class="small">No quedan participantes pendientes.</div>';
 }
 
+function toggleSimPause(){simPaused=!simPaused;renderSimDelivery()}
+function simSkipCurrent(){
+  if(!simDeliveryCurrent)return;
+  const max=Math.max(0,...simDeliveryRows.map(x=>x.order||0));
+  simDeliveryCurrent.order=max+1;
+  renderSimDelivery();
+}
 function openSimDelivery(personId){
   simDeliveryCurrent=simDeliveryRows.find(x=>x.receiver.id===personId)||null;
   if(!simDeliveryCurrent)return;
@@ -530,11 +572,24 @@ async function confirmFinalDraw(){
       p_assignments:pendingFinalDraw.rows.map(x=>({person_id:x.person.id,assigned_person_id:x.recipient.id})),
       p_same_group_conflicts:pendingFinalDraw.sameGroupConflicts
     });
+    const savedResult=pendingFinalDraw;
     pendingFinalDraw=null;
     finalDrawDialog.close();
     await load();
     simBox.classList.add('hidden');
+    const eligible=drawPool();
+    drawDoneSummary.innerHTML=
+      'Participantes incluidos: <b>'+eligible.length+'</b><br>'+
+      'Regalos registrados: <b>'+people.filter(p=>p.brought_gift&&p.gift_number!=null).length+'</b><br>'+
+      'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
+      'Cruces de grupo/familia: <b>'+Number(savedResult?.sameGroupConflicts||0)+'</b>';
+    drawDoneDialog.showModal();
   }catch(e){alert(e.message||e)}
+}
+
+function startRealDelivery(){
+  drawDoneDialog.close();
+  location.href='delivery.html?id='+encodeURIComponent(exchangeId)+'&start=1';
 }
 
 function renderDraw(){
