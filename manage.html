@@ -205,6 +205,7 @@ function renderPeople(){
       <div><b>${esc(p.name)}</b><div class="small">${p.group_name?esc(p.group_name):'Sin grupo/familia'} · ${p.brought_gift?'Regalo recibido #'+p.gift_number:'Regalo pendiente'}</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
         ${exclusionButton(p.id)}
+        <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="removePerson('${p.id}')">No participa</button>
         ${p.brought_gift
           ? `<span class="gift">#${p.gift_number}</span> <button class="btn light" ${deliveryLocked()?'disabled':''} onclick="setGift('${p.id}',false)">Quitar regalo</button>`
           : `<button class="btn primary" onclick="setGift('${p.id}',true)">Registrar regalo</button>`}
@@ -245,6 +246,27 @@ async function addPerson(){
       p_type:newPersonType.value
     });
     addPersonDialog.close();
+    await load();
+  }catch(e){alert(e.message||e)}
+}
+
+async function removePerson(id){
+  if(!ensureExchangeEditable())return;
+  const p=people.find(x=>x.id===id);
+  if(!p)return;
+  const giftText=p.brought_gift&&p.gift_number!=null
+    ? '\n\nTambién saldrá del sorteo su regalo #'+p.gift_number+'.'
+    : '';
+  const redrawText=exchange.draw_finalized
+    ? '\n\nEl sorteo actual quedará invalidado y tendrás que realizarlo de nuevo.'
+    : '';
+  const meetingText=meeting
+    ? '\n\nSeguirá existiendo como participante de la reunión general.'
+    : '';
+  if(!confirm('¿Marcar a '+p.name+' como NO participante de este Amigo invisible?'+giftText+redrawText+meetingText))return;
+  try{
+    await rpc('secret_santa_app_remove_person',{p_exchange_id:exchangeId,p_person_id:id});
+    simBox.classList.add('hidden');
     await load();
   }catch(e){alert(e.message||e)}
 }
@@ -319,8 +341,12 @@ function shuffled(a){
   return x;
 }
 
+function drawPool(){
+  return isClassic()?people:people.filter(p=>p.brought_gift&&p.gift_number!=null);
+}
+
 function calcMatching(){
-  const pool=people;
+  const pool=drawPool();
   if(pool.length<2)return null;
   let best=null,bestScore=Infinity;
 
@@ -370,14 +396,15 @@ function calcMatching(){
 
 function simulate(){
   if(!ensureExchangeEditable())return;
-  const count=people.length;
-  if(count<2)return alert('Se necesitan al menos 2 participantes.');
+  const pool=drawPool();
+  const count=pool.length;
+  if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 participantes que hayan entregado regalo.');
   const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
 
   simBox.classList.remove('hidden');
 
-  const missing=people.filter(p=>!p.brought_gift||p.gift_number==null).length;
+  const missing=isClassic()?people.filter(p=>!p.brought_gift||p.gift_number==null).length:0;
   simSummary.innerHTML=
     (r.sameGroupConflicts===0
       ?'<div class="ok">✅ Sin cruces de grupo/familia.</div>'
@@ -466,21 +493,22 @@ function simSetPending(personId){
 
 function finalizeDraw(){
   if(!ensureExchangeEditable())return;
-  const count=people.length;
-  if(count<2)return alert('Se necesitan al menos 2 participantes.');
+  const pool=drawPool();
+  const count=pool.length;
+  if(count<2)return alert(isClassic()?'Se necesitan al menos 2 participantes.':'Se necesitan al menos 2 participantes que hayan entregado regalo.');
   const r=calcMatching();
   if(!r)return alert('No existe una combinación válida con las exclusiones actuales. Revisa alguna exclusión antes de continuar.');
   pendingFinalDraw=r;
-  const missingGifts=people.filter(p=>!p.brought_gift||p.gift_number==null);
+  const missingGifts=isClassic()?people.filter(p=>!p.brought_gift||p.gift_number==null):[];
   finalDrawWarning.textContent=(isClassic()
     ?'Se guardará quién regala a quién.'
-    :'Se guardará qué regalo corresponde a cada participante.')+
+    :'Solo entran en el sorteo las personas que han entregado un regalo. Se guardará qué regalo corresponde a cada una.')+
     ' Podrás corregir datos o repetir el sorteo hasta que marques la primera entrega como completada.'+
     (missingGifts.length?' Hay '+missingGifts.length+' participante(s) sin regalo registrado; podrán entregarlo después o fuera del evento.':'');
   finalDrawCheckText.textContent='He revisado los participantes y exclusiones y quiero guardar este sorteo.';
   finalDrawSummary.innerHTML=
     '<b>Resumen antes de guardar</b><br>'+
-    'Participantes: <b>'+count+'</b><br>'+
+    (isClassic()?'Participantes en el sorteo: <b>'+count+'</b><br>':'Participantes con regalo que entran en el sorteo: <b>'+count+'</b><br>')+
     'Regalos registrados: <b>'+people.filter(p=>p.brought_gift&&p.gift_number!=null).length+'</b><br>'+
     'Exclusiones configuradas: <b>'+exclusions.length+'</b><br>'+
     'Cruces de grupo/familia: <b>'+r.sameGroupConflicts+'</b>'+
@@ -509,12 +537,12 @@ async function confirmFinalDraw(){
 
 function renderDraw(){
   const classic=isClassic();
-  const eligible=people;
+  const eligible=drawPool();
   const locked=deliveryLocked();
   const gifts=people.filter(p=>p.brought_gift&&p.gift_number!=null).length;
   drawInfo.textContent=classic
     ?`Participan ${eligible.length} personas · ${gifts} regalo(s) registrados · ${exclusions.length} exclusión(es). El sorteo indica en secreto quién regala a quién.`
-    :`Participan ${eligible.length} personas · ${gifts} regalo(s) registrados · ${exclusions.length} exclusión(es). Los regalos que falten podrán entregarse posteriormente.`;
+    :`Entran en el sorteo ${eligible.length} personas porque han entregado regalo · ${people.length-eligible.length} persona(s) quedan fuera por no haberlo entregado · ${exclusions.length} exclusión(es).`;
   simulateBtn.disabled=locked;
   finalBtn.classList.toggle('hidden',locked);
   finalBtn.textContent=exchange.draw_finalized?'🔄 Rehacer sorteo':'🎲 Realizar sorteo';
@@ -534,7 +562,7 @@ function renderDraw(){
     personResult.innerHTML='<option value="">Selecciona una persona...</option>'+eligible.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
     resultHelp.textContent=classic
       ?'Consulta privada de a quién debe regalar cada participante.'
-      :'Consulta privada del regalo asignado. Si todavía no está físicamente registrado, aparecerá como pendiente.';
+      :'Consulta privada del número de regalo asignado. En este modo solo participan quienes han entregado regalo.';
   }else{
     finalStatus.classList.add('hidden');
   }
