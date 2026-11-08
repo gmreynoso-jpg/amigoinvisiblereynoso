@@ -28,13 +28,16 @@ Deno.serve(async (req) => {
     if (!exchange_id) throw new Error("Falta exchange_id");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}");
+    const serviceRole = secretKeys.default || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const resendKey = Deno.env.get("RESEND_API_KEY")!;
     const fromEmail = Deno.env.get("SECRET_SANTA_FROM_EMAIL")!;
 
     if (!resendKey || !fromEmail) {
       throw new Error("Faltan RESEND_API_KEY o SECRET_SANTA_FROM_EMAIL");
     }
+
+    if (!serviceRole) throw new Error("No hay una secret key de Supabase disponible en la Edge Function");
 
     const db = createClient(supabaseUrl, serviceRole, {
       auth: { persistSession: false },
